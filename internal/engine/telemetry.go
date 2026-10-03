@@ -25,6 +25,7 @@ type Telemetry struct {
 	TxReadBytes            uint64                 `json:"tx_read_bytes"`
 	RxDeliveredBytes       uint64                 `json:"rx_delivered_bytes"`
 	EnqueueDrops           uint64                 `json:"enqueue_drops"`
+	TUNQueueDrops          uint64                 `json:"tun_queue_drops"`
 	Replays                uint64                 `json:"replays"`
 	AuthenticationFailures uint64                 `json:"authentication_failures"`
 	Malformed              uint64                 `json:"malformed"`
@@ -41,6 +42,7 @@ func (e *Engine) SnapshotTelemetry(now time.Time) Telemetry {
 		Recoveries: e.recoveries.Load(), Goroutines: runtime.NumGoroutine(), HeapAllocBytes: memory.HeapAlloc,
 		TxReadPackets: e.txPackets.Load(), RxDeliveredPackets: e.rxPackets.Load(),
 		TxReadBytes: e.txBytes.Load(), RxDeliveredBytes: e.rxBytes.Load(), EnqueueDrops: e.drops.Load(),
+		TUNQueueDrops: e.tunQueueDrops.Load(),
 		Replays: e.replays.Load(), AuthenticationFailures: e.authFails.Load(), Malformed: e.malformed.Load()}
 	if c, ok := e.carrier.(carrier.Statser); ok {
 		v := c.SnapshotStats()

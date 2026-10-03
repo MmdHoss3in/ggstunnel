@@ -37,6 +37,7 @@ type Engine struct {
 	txBytes   atomic.Uint64
 	rxBytes   atomic.Uint64
 	drops     atomic.Uint64
+	tunQueueDrops atomic.Uint64
 
 	replays     atomic.Uint64
 	reflections atomic.Uint64
@@ -184,6 +185,9 @@ func (e *Engine) runWorkers(parent context.Context) error {
 }
 
 func (e *Engine) tunToCarrier(ctx context.Context) error {
+	if e.cfg.Profile == "bip" {
+		return e.fairTunToCarrier(ctx)
+	}
 	buf := make([]byte, 65535)
 	for {
 		n, err := e.tun.Read(buf)
@@ -193,9 +197,13 @@ func (e *Engine) tunToCarrier(ctx context.Context) error {
 		if n == 0 {
 			continue
 		}
-		// Seal consumes the packet synchronously and returns an owned encrypted
-		// frame, so the TUN read buffer does not need an intermediate copy.
-		pkt := buf[:n]
+		if err := e.sendPacket(ctx, buf[:n]); err != nil {
+			return err
+		}
+	}
+}
+
+func (e *Engine) sendPacket(ctx context.Context, pkt []byte) error {
 		pid := e.codec.NextPacketID()
 		maxp := e.cfg.Performance.MaxFramePayload
 		cnt := (len(pkt) + maxp - 1) / maxp
@@ -232,13 +240,13 @@ func (e *Engine) tunToCarrier(ctx context.Context) error {
 			}
 		}
 		e.txPackets.Add(1)
-		e.txBytes.Add(uint64(n))
+		e.txBytes.Add(uint64(len(pkt)))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-	}
+		return nil
 }
 
 func (e *Engine) carrierToTun(ctx context.Context) error {
