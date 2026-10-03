@@ -373,7 +373,7 @@ func (c *Config) Validate() error {
 		}
 
 		if c.Performance.MaxFramePayload > 1348 {
-			return errors.New("bip v3 max_frame_payload must be <= 1348 for a 1500-byte outer MTU")
+			return errors.New("BIP5 max_frame_payload must be <= 1348 for a 1500-byte outer MTU")
 		}
 		if c.Transport.BIPPullPPS < 100 || c.Transport.BIPPullPPS > 100000 {
 			return errors.New("transport.bip_pull_pps must be 100..100000")

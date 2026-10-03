@@ -1,28 +1,25 @@
-# v0.3.0-rc4 — BIP5 recovery, bounded backpressure and offline menu
+# v0.3.0-rc4 — short recovery validation and SACK loss recovery
 
-This release candidate keeps the BIP5 wire format. Upgrade both peers to benefit from the new sender and receiver behavior.
+This release candidate prepares for field stability testing. Multi-day tests on the real Iran/foreign path remain with the operator. The BIP5 wire format is retained; upgrade both peers.
 
-## Changes
+## Changes since rc3
 
-- Keep a probe-verified FAST path through individual data timeouts; retain congestion control without repeatedly discarding learned capacity on path changes.
-- Bound congestion reductions to a transmitted flight, so staggered deadlines for the same loss episode cannot repeatedly halve the window. PULL-based loss recovery uses the same controller.
-- Apply cancellable, bounded BIP and TCP backpressure to the real TUN reader instead of dropping frames on a full userspace send queue.
-- Preserve Linux TCP receive/send buffer autotuning instead of forcing socket sizes that may be capped by global socket limits. Datagram carriers retain their configured socket buffers.
-- Separate BIP's unsent backlog (at most 256 frames) from its 4096-frame flight window. New/default TUN queues use 256 packets; menu option 21 applies this to existing BIP configurations. This bounds queueing delay without capping the bandwidth-delay product at 256 frames.
-- Batch dedicated ACKs while preserving authenticated ICMP reply tuples and immediate duplicate acknowledgements.
-- Replace full pending-map timeout scans with an indexed deadline heap. Remove acknowledged entries immediately.
-- Use current time, rather than an aged ticker timestamp, for scheduling.
-- Keep slow start across healthy path transitions, stop sustaining PULL polling once FAST works, and use nonblocking raw sends so socket pressure cannot block ACK processing.
-- Validate the complete release manifest before executing the candidate binary.
-- Open the installed menu offline with `sudo ggstunnel`, `setup.sh menu`, or `install.sh menu`. Plain setup opens the existing menu; explicit install/update handles packages only when missing.
-- Publish both Linux amd64 and arm64 binaries, full source, and SHA256 manifests in one release archive.
+- Detect delivery holes from newly acknowledged SACK frames. Duplicate acknowledgements cannot manufacture loss evidence. A short reordering allowance precedes the paced retry.
+- Retain accepted BIP frames in a bounded receive reorder buffer and deliver them in sequence. Reserve room for the missing frame so a full future window cannot deadlock recovery. This avoids exposing outer reordering to inner TCP, but can delay other flows on the same BIP tunnel during loss.
+- Distinguish SACK recovery with an active ACK clock from a delivery timeout: reduce the window by 20% and pause growth for one measured RTT for fast loss; retain the stronger timeout response, pacing, bounded flight window and exponential retry backoff.
+- Expose fast_retransmits and reorder_buffered in JSON telemetry.
+- Restore the previous systemd unit on failed upgrade and explicit release rollback, alongside the previous executable and manager. Preserve stopped/enabled states and configuration.
+- Read the binary and manager version from one embedded version file; validate standalone bootstrap/documentation pins and tag consistency before publication.
+- Require native ARM64/Ubuntu 24.04 and amd64/Ubuntu 22.04 race/audit tests plus real systemd install, active upgrade, rollback, temporary stop and disable checks.
+- Measure each throughput sample with fresh tunnel processes and controller state, two seconds of warm-up, and eight measured seconds. Require at least 30Mbps in the clean 100Mbps/80ms synthetic case; lossy checks have a 1Mbps connectivity/regression floor, not a stable performance target.
+- Exercise BIP with 0%, 0.2% and 1% loss per direction, a three-second complete blackout during an established TCP transfer, peer restart, and a deliberately configured 1200-byte outer MTU.
 
 ## Validation and limits
 
-The release workflow requires race/audit tests, manager/installer tests, privileged raw ICMP and TUN tests, concurrent/sustained carrier simulations, and a real encrypted TUN throughput test through two Linux network namespaces at 80ms base RTT with and without synthetic loss. See the linked Actions run for actual measured results.
+The release waits for formatting/vet, race/audit, parser/controller fuzzing, manager/offline-menu tests, real kernel TUN/raw sockets, concurrent FAST/PULL simulations, all five real encrypted carrier throughput checks, and both native platform jobs. Exact tagged-build measurements and short recovery results follow below and are attached as JSONL assets.
 
-These tests do not establish multi-day uptime or 100/200Mbps on an Iran–foreign WAN. No fixed 10Mbps cap is added or removed; throughput remains dependent on congestion, ICMP handling, RTT, loss and the hosts. The queue and 4096-frame flight span remain bounded.
+Short synthetic samples establish the exercised behavior only. Loss remains a material BIP performance limitation. Outer-MTU testing uses a 1040-byte TUN/payload configuration; automatic PMTU discovery is not implemented. Exhausted retries can still terminate a carrier and trigger systemd restart. Longer outages, real provider ICMP policing, multi-day resource behavior and real Xray load need field validation before a stable release.
 
-## Install
+## Install or update
 
-Download `ggstunnel-linux.tar.gz` and `SHA256SUMS`, run `sha256sum -c SHA256SUMS`, extract, then `sudo bash ggstunnel/setup.sh install` on both servers. Use the README for the GitHub bootstrap command, Xray forwarding, upgrade and rollback instructions. The GitHub-generated source archives do not contain built binaries.
+Use the pinned rc4 bootstrap in README.md on both peers. Alternatively download ggstunnel-linux.tar.gz and SHA256SUMS, verify with sha256sum -c SHA256SUMS, extract, and run sudo bash ggstunnel/setup.sh install. No Go toolchain is needed on the server. Later sudo ggstunnel opens the installed menu offline, without dependency checks.

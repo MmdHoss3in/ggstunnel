@@ -1,35 +1,38 @@
 # Validation and known limits
 
-Cloud tests run on GitHub Actions Ubuntu 24.04; no toolchain or test packages are installed on the user's workstation. See the [workflow](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml) for the exact commit and full logs.
+All builds and runtime tests run in GitHub Actions; no Go toolchain or test packages are installed on the user's workstation. See the workflow and the release for the exact commit and logs.
 
-Required release checks:
+## Required rc4 release checks
 
-- Go formatting, vet, race detector and audit tests.
-- Fuzzing BIP wire decoding, frame decoding and controller events.
-- Manager install/update/rollback and offline menu dispatch tests.
+- Go formatting, vet, race detector, audit tests and short parser/controller fuzzing.
+- SACK evidence, duplicate/reordered ACK, sequence-wrap, bounded ordered receive and cancellation regressions.
+- Manager install/update/rollback, service-unit restoration and offline menu dispatch tests.
 - Privileged raw ICMP loopback and actual kernel TUN cancellation.
 - Sustained FAST/PULL simulation and nine concurrent simulated peers.
-- Actual built binary, AES-GCM, TUN, raw sockets/kernel TCP, and iperf3 across two Linux network namespaces for BIP/TCP/UDP/ICMP/GRE.
+- Actual amd64 binary, AES-GCM, TUN, raw sockets/kernel TCP and iperf3 across two Linux network namespaces for BIP/TCP/UDP/ICMP/GRE on Ubuntu 24.04.
+- Native race/audit and real systemd installation/lifecycle checks on Ubuntu 22.04/amd64 and Ubuntu 24.04/arm64. These do not measure ARM64 WAN throughput.
 
-## Measurements during development
+The release job depends on all jobs succeeding and validates the exact source tag. It publishes measured network-results.jsonl and recovery-results.jsonl beside the package and checksums. Throughput samples use a 100Mbps netem link, 80ms base RTT, fresh tunnel/controller state per direction/loss case, four TCP streams, two warm-up seconds and eight measured seconds. BIP tests 0%, 0.2% and 1% random loss per direction; other carriers currently test the clean link. The clean floor is 30Mbps; the lossy 1Mbps floor is only a connectivity/regression gate.
 
-[Run 37101380367](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37101380367) tested commit `db9f23d` before the final TCP backpressure and socket autotuning changes. Each measured TCP transfer used four streams for eight seconds, with a netem link capped at 100Mbps and a base RTT of 80ms. Directions ran sequentially and shared tunnel/controller state; these are diagnostic samples, not statistically controlled benchmarks.
+Short real BIP recovery checks cover a three-second total blackout while a TCP flow is established, restart of one peer without restarting the survivor, and a 1200-byte outer MTU with a deliberately chosen 1040-byte TUN/payload. Native systemd tests cover installation, ON, upgrade while running, rollback, STOP with boot state preserved, and OFF.
 
-| Carrier | Applied loss per direction | Forward receive Mbps | Reverse receive Mbps |
+## Verified rc3 baseline
+
+[The rc3 release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.0-rc3) used sequential samples sharing controller state, without the rc4 warm-up/isolation procedure. Its exact tagged results were:
+
+| Carrier | Loss per direction | Forward Mbps | Reverse Mbps |
 |---|---:|---:|---:|
-| BIP5 | 0% | 69.939 | 78.642 |
-| BIP5 | 0.2% | 6.749 | 3.408 |
-| TCP (before final TCP fixes) | 0% | 14.884 | 15.204 |
-| UDP | 0% | 83.938 | 84.539 |
-| ICMP | 0% | 78.911 | 84.408 |
-| GRE | 0% | 82.641 | 83.483 |
+| BIP5 | 0% | 72.995 | 73.786 |
+| BIP5 | 0.2% | 7.703 | 2.490 |
+| TCP | 0% | 78.601 | 82.836 |
+| UDP | 0% | 83.804 | 84.668 |
+| ICMP | 0% | 78.496 | 84.539 |
+| GRE | 0% | 82.635 | 83.491 |
 
-The separate carrier-only simulator recorded roughly 491Mbps FAST and 319Mbps PULL in that run. It omits real TUN, raw sockets and inner encryption and must not be presented as end-to-end WAN throughput.
+Changes in test procedure and random loss mean single samples are not a statistically controlled before/after comparison. Carrier-only simulator speeds omit real sockets, TUN and inner encryption and are not end-to-end rates.
 
-## Limits that remain
+## Remaining field validation
 
-The unreleased rc2 tag's loss test had one iperf control/transfer failure while the identical commit passed a separate main-branch run. rc3 bounds the unsent queue separately from the flight window to reduce queueing under loss; the failed run is retained in Actions history. This is not evidence of multi-day stability.
+Loss still reduces useful BIP throughput and is not a solved performance problem. Ordered delivery can hold unrelated flows behind a missing frame. Custom congestion control, retry limits, bounded queues, and provider ICMP policing remain relevant. Automatic PMTU discovery is not implemented. Exhausting retry limits can stop the carrier; systemd's on-failure restart remains the recovery mechanism for that condition.
 
-Loss materially reduces BIP throughput: the synthetic loss measurement above remains a performance limitation, not a successful 100Mbps result. Reliability/backpressure fixes do not remove the bounded congestion window, retransmission delay, inner TCP congestion control or provider ICMP policing. The known queue and path-reset bugs were addressed; there is no claim that all possible bugs or bottlenecks have been eliminated.
-
-The release job repeats validation on the exact tagged source. amd64 is executed; arm64 is cross-compiled. Ubuntu 22.04 and multi-day real Iran/foreign WAN uptime have not been exercised by this workflow. A passing short test is not a stable-release or throughput guarantee.
+The operator will perform multi-day real Iran/foreign WAN and connected-user/Xray tests. Short cloud checks do not establish multi-day uptime, resilience to every type or duration of outage, nine simultaneous real WAN peers, or a fixed throughput on a provider path. rc4 remains a release candidate until those observations support a stable release. Failed development runs remain in Actions history.

@@ -467,7 +467,7 @@ def rollback():
         run(['systemctl','daemon-reload'],check=False)
         for n in running:run(['systemctl','restart',unit(n)],check=False)
         raise
-    symlink(current,OPT/'previous');print('Rolled back executable/manager; configuration retained')
+    symlink(current,OPT/'previous');print('Rolled back executable/manager/service unit; configuration retained')
 
 @contextlib.contextmanager
 def locked():
