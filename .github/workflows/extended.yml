@@ -1,0 +1,106 @@
+name: rc4 extended short cloud validation
+on:
+  push:
+    branches: [testing/rc4-short-validation]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  experiments:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { mode: performance, profile: bip, shard: 0, runner: ubuntu-24.04 }
+          - { mode: performance, profile: tcp, shard: 0, runner: ubuntu-24.04 }
+          - { mode: performance, profile: udp, shard: 0, runner: ubuntu-24.04 }
+          - { mode: performance, profile: icmp, shard: 0, runner: ubuntu-24.04 }
+          - { mode: performance, profile: gre, shard: 0, runner: ubuntu-24.04 }
+          - { mode: recovery, profile: bip, shard: 0, runner: ubuntu-24.04 }
+          - { mode: recovery, profile: bip, shard: 1, runner: ubuntu-24.04 }
+          - { mode: recovery, profile: bip, shard: 2, runner: ubuntu-24.04 }
+          - { mode: recovery, profile: bip, shard: 3, runner: ubuntu-24.04 }
+          - { mode: recovery, profile: bip, shard: 4, runner: ubuntu-24.04 }
+          - { mode: recovery, profile: bip, shard: 5, runner: ubuntu-24.04 }
+          - { mode: resources, profile: bip, shard: 0, runner: ubuntu-24.04 }
+          - { mode: resources, profile: bip, shard: 0, runner: ubuntu-24.04-arm }
+          - { mode: impairments, profile: bip, shard: 0, runner: ubuntu-24.04 }
+          - { mode: lifecycle, profile: bip, shard: 0, runner: ubuntu-24.04 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.3.0-rc4
+          path: release-source
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Build exact tagged runtime and check harness
+        run: |
+          test "$(git -C release-source rev-parse HEAD)" = ce87571f35ff21598fe9e8b1ae1b35efa1353c1b
+          bash release-source/scripts/build-release.sh
+          python3 -m py_compile scripts/cloud_extended.py scripts/cloud_probe.py scripts/cloud_summary.py
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3
+      - name: Run prescribed experiment
+        env:
+          GITHUB_ACTIONS: 'true'
+        run: sudo env GITHUB_ACTIONS=true python3 scripts/cloud_extended.py '${{ matrix.mode }}' --profile '${{ matrix.profile }}' --shard '${{ matrix.shard }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: extended-${{ matrix.mode }}-${{ matrix.profile }}-${{ matrix.shard }}-${{ matrix.runner }}
+          path: extended-results/
+          if-no-files-found: warn
+  boundaries:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.3.0-rc4
+          path: release-source
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Repeat expiry, wrap, replay, rotation and shutdown boundaries
+        working-directory: release-source
+        run: |
+          mkdir -p ../boundary-results
+          go test -race -tags audit ./internal/carrier ./internal/frame ./internal/session ./internal/engine -run 'Wrap|Boundary|Expiry|Budget|Rotation|WorkerShutdown' -count=50 -timeout 6m -v | tee ../boundary-results/boundaries.log
+      - name: Diagnostic live heap and goroutine cycles
+        run: |
+          cp scripts/resource_cycles_test.go.txt release-source/internal/carrier/cloud_resources_test.go
+          cd release-source
+          gofmt -w internal/carrier/cloud_resources_test.go
+          go test -race ./internal/carrier -run '^TestCloudRepeatedActorResources$' -count=1 -timeout 5m -v | tee ../boundary-results/resources.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: extended-boundaries
+          path: boundary-results/
+  summary:
+    if: always()
+    needs: [experiments, boundaries]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: extended-*
+          path: collected
+      - name: Aggregate all observations without discarding failures
+        run: |
+          python3 scripts/cloud_summary.py
+          cat extended-report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extended-final-report
+          path: |
+            extended-report.md
+            extended-summary.json

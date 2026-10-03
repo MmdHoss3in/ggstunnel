@@ -1,0 +1,47 @@
+package carrier
+
+import (
+	"context"
+	"runtime"
+	"testing"
+	"time"
+)
+
+// Diagnostic-only test copied into the exact rc4 source tree by extended CI.
+// It measures live Go resources, not throughput or the release process RSS.
+func TestCloudRepeatedActorResources(t *testing.T) {
+	runtime.GC()
+	var baseline runtime.MemStats
+	runtime.ReadMemStats(&baseline)
+	workers := runtime.NumGoroutine()
+	for cycle := 0; cycle < 50; cycle++ {
+		t.Run(string(rune('A'+cycle)), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			l := &simLink{adaptive: true, copies: 1, requests: make(map[[3]uint16]time.Time)}
+			a := l.start(t, 0, ctx)
+			b := l.start(t, 1, ctx)
+			waitFor(t, func() bool { return a.PeerSession() == b.localID && b.PeerSession() == a.localID })
+			for i := 0; i < 100; i++ {
+				payload := make([]byte, 1024)
+				payload[0] = byte(i)
+				if err := a.SendContext(ctx, payload); err != nil { t.Fatal(err) }
+				select {
+				case got := <-b.Recv():
+					if len(got) != len(payload) || got[0] != byte(i) { t.Fatal("payload changed") }
+				case <-time.After(3*time.Second): t.Fatal("actor delivery stalled")
+				}
+			}
+			cancel()
+			a.Close()
+			b.Close()
+		})
+	}
+	time.Sleep(100*time.Millisecond)
+	runtime.GC()
+	var final runtime.MemStats
+	runtime.ReadMemStats(&final)
+	t.Logf("resource_cycles=50 heap_before=%d heap_after=%d goroutines_before=%d goroutines_after=%d", baseline.HeapAlloc, final.HeapAlloc, workers, runtime.NumGoroutine())
+	if final.HeapAlloc > baseline.HeapAlloc+32*1024*1024 || runtime.NumGoroutine() > workers+10 {
+		t.Fatal("actor resources exceeded diagnostic bounds after shutdown/GC")
+	}
+}
