@@ -17,6 +17,7 @@ func (b *BIP) receiveOrdered(seq uint32, payload []byte) bool {
 		return false
 	}
 	b.rxHold[seq] = append([]byte(nil), payload...)
+	b.rxBuffered.Store(uint64(len(b.rxHold)))
 	b.recordRXSeqLocked(seq)
 	b.payloadFrameRx.Add(1)
 	b.drainRX()
@@ -32,6 +33,7 @@ func (b *BIP) drainRX() {
 		select {
 		case b.rx <- payload:
 			delete(b.rxHold, b.rxNext)
+			b.rxBuffered.Store(uint64(len(b.rxHold)))
 			b.rxNext = nextSequence(b.rxNext)
 		default:
 			return

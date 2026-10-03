@@ -54,6 +54,9 @@ type RuntimeStats struct {
 	PullActive      bool   `json:"pull_active"`
 	CompatActive    bool   `json:"compat_active"`
 	TxErrors        uint64 `json:"tx_errors"`
+
+	FastRetransmits uint64 `json:"fast_retransmits"`
+	ReorderBuffered uint64 `json:"reorder_buffered"`
 }
 
 type Statser interface{ SnapshotStats() RuntimeStats }

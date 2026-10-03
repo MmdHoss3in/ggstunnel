@@ -143,6 +143,9 @@ type BIP struct {
 
 	rxHold map[uint32][]byte
 	rxNext uint32
+
+	fastRetries atomic.Uint64
+	rxBuffered  atomic.Uint64
 }
 
 func NewBIP(c *config.Config) (Carrier, error) {
@@ -625,6 +628,9 @@ func (b *BIP) retryOnPull(id, tuple uint16, now time.Time) bool {
 	}
 	oldest.item.retries++
 	b.retransmits.Add(1)
+	if oldest.fast {
+		b.fastRetries.Add(1)
+	}
 	b.queuePending(oldest.item, pendingModePull, now)
 	_ = b.send(0, id, tuple, bipKindData, bipFlagMore|bipFlagPulled, oldest.item.seq, oldest.item.data, b.active)
 	return true
@@ -668,6 +674,7 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.rxAck = sackWindow{init: true, seen: make(map[uint32]bool)}
 	b.rxHold = nil
 	b.rxNext = 1
+	b.rxBuffered.Store(0)
 	b.ackMu.Unlock()
 	b.active = id
 	b.sessionKey = key
@@ -1071,6 +1078,9 @@ func (b *BIP) run(ctx context.Context) {
 				}
 				pd.item.retries++
 				b.retransmits.Add(1)
+				if pd.fast {
+					b.fastRetries.Add(1)
+				}
 				b.queuePending(pd.item, pendingModeRequest, now)
 				id, s := b.nextTuple()
 				// DATA loss is congestion evidence, not proof the FAST path died.
@@ -1227,5 +1237,5 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 	b.ackMu.Lock()
 	pending := len(b.pending)
 	b.ackMu.Unlock()
-	return RuntimeStats{WireTxBytes: b.wireTxBytes.Load(), WireRxBytes: b.wireRxBytes.Load(), FastDataTx: b.fastDataTx.Load(), PullDataTx: b.pullDataTx.Load(), CompatDataTx: b.compatDataTx.Load(), IdleProbeTx: b.idleProbeTx.Load(), FastProbeTx: b.fastProbeTx.Load(), FastAckTx: b.fastAckTx.Load(), NeedPullTx: b.needPullTx.Load(), PullProbeTx: b.pullProbeTx.Load(), FastAckRx: b.fastAckRx.Load(), NeedPullRx: b.needPullRx.Load(), PullProbeRx: b.pullProbeRx.Load(), ReflectionsSuppressed: b.reflectionsSuppressed.Load(), PayloadFrameRx: b.payloadFrameRx.Load(), HMACFail: b.hmacFail.Load(), MalformedWire: b.malformedWire.Load(), UnknownSession: b.unknownSession.Load(), DataDuplicate: b.dataDuplicate.Load(), Pending: uint64(pending), Backlog: uint64(len(b.tx)), Retransmits: b.retransmits.Load(), PendingExpired: b.pendingExpired.Load(), PendingOverflow: b.pendingOverflow.Load(), FastPromotions: b.fastPromotions.Load(), FastDemotions: b.fastDemotions.Load(), FastHealthy: b.fastHealthy.Load(), PullActive: b.pullActive.Load(), CompatActive: b.compatActive.Load(), TxErrors: b.txErrors.Load()}
+	return RuntimeStats{FastRetransmits: b.fastRetries.Load(), ReorderBuffered: b.rxBuffered.Load(), WireTxBytes: b.wireTxBytes.Load(), WireRxBytes: b.wireRxBytes.Load(), FastDataTx: b.fastDataTx.Load(), PullDataTx: b.pullDataTx.Load(), CompatDataTx: b.compatDataTx.Load(), IdleProbeTx: b.idleProbeTx.Load(), FastProbeTx: b.fastProbeTx.Load(), FastAckTx: b.fastAckTx.Load(), NeedPullTx: b.needPullTx.Load(), PullProbeTx: b.pullProbeTx.Load(), FastAckRx: b.fastAckRx.Load(), NeedPullRx: b.needPullRx.Load(), PullProbeRx: b.pullProbeRx.Load(), ReflectionsSuppressed: b.reflectionsSuppressed.Load(), PayloadFrameRx: b.payloadFrameRx.Load(), HMACFail: b.hmacFail.Load(), MalformedWire: b.malformedWire.Load(), UnknownSession: b.unknownSession.Load(), DataDuplicate: b.dataDuplicate.Load(), Pending: uint64(pending), Backlog: uint64(len(b.tx)), Retransmits: b.retransmits.Load(), PendingExpired: b.pendingExpired.Load(), PendingOverflow: b.pendingOverflow.Load(), FastPromotions: b.fastPromotions.Load(), FastDemotions: b.fastDemotions.Load(), FastHealthy: b.fastHealthy.Load(), PullActive: b.pullActive.Load(), CompatActive: b.compatActive.Load(), TxErrors: b.txErrors.Load()}
 }

@@ -13,7 +13,7 @@ def main():
     if os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true':
         raise RuntimeError('Requires root on a disposable GitHub Actions runner')
     source = Path(__file__).resolve().parents[1]
-    name = 'ggssmoke'
+    name = 'ggs168'
     path = m.confpath(name)
     if path.exists():
         raise RuntimeError('Refusing to replace an existing smoke configuration')
@@ -44,10 +44,12 @@ def main():
             if (m.OPT / 'current').resolve() != first or not m.active(name):
                 raise RuntimeError('Rollback failed to restore the running release')
         m.action('stop', name)
-        if m.active(name) or not m.enabled(name):
+        enabled = m.run(['systemctl', 'is-enabled', '--quiet', m.unit(name)], check=False).returncode == 0
+        if m.active(name) or not enabled:
             raise RuntimeError('Temporary stop changed boot enable state')
         m.action('off', name)
-        if m.active(name) or m.enabled(name):
+        enabled = m.run(['systemctl', 'is-enabled', '--quiet', m.unit(name)], check=False).returncode == 0
+        if m.active(name) or enabled:
             raise RuntimeError('OFF did not disable the service')
         m.run(['/usr/local/bin/ggstunnel', 'status'])
         print('PASS: real systemd install, ON, active upgrade, rollback, STOP and OFF')
