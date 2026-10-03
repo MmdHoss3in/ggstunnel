@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 spec=importlib.util.spec_from_file_location('manage',Path(__file__).with_name('manage.py'))
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
-EXE=Path(__file__).resolve().parents[1]/'dist'/'ggstunnel-linux-amd64'
+EXE=Path(__file__).resolve().parents[1]/'dist'/('ggstunnel-linux-'+m.arch())
 
 class ManagerTests(unittest.TestCase):
  def setUp(self):
