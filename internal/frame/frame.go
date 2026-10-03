@@ -109,17 +109,18 @@ func (c *Codec) Seal(typ byte, packetID uint32, fragIndex, fragCount uint16, pay
 	if h.Seq > 1<<32 {
 		return nil, ErrKeyLifetime
 	}
-	hb := marshalHeader(h)
-	nonce := make([]byte, c.aead.NonceSize())
+	// One owned frame allocation; the ciphertext destination is disjoint
+	// from the authenticated header and nonce. Do not pool frames retained
+	// by the reliable carrier for later retransmission.
+	prefix := HeaderLen + c.aead.NonceSize()
+	out := make([]byte, prefix+len(payload)+c.aead.Overhead())
+	writeHeader(out[:HeaderLen], h)
+	nonce := out[HeaderLen:prefix]
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	ct := c.aead.Seal(nil, nonce, payload, hb)
-	out := make([]byte, 0, len(hb)+len(nonce)+len(ct))
-	out = append(out, hb...)
-	out = append(out, nonce...)
-	out = append(out, ct...)
-	return out, nil
+	ct := c.aead.Seal(out[prefix:prefix], nonce, payload, out[:HeaderLen:HeaderLen])
+	return out[:prefix+len(ct)], nil
 }
 
 func (c *Codec) Open(b []byte) (*Decoded, error) {
@@ -175,6 +176,11 @@ func (c *Codec) OpenForSession(b []byte, sid uint64) (*Decoded, error) {
 
 func marshalHeader(h Header) []byte {
 	b := make([]byte, HeaderLen)
+	writeHeader(b, h)
+	return b
+}
+
+func writeHeader(b []byte, h Header) {
 	copy(b[0:4], magic[:])
 	b[4] = Version
 	b[5] = h.Type
@@ -185,7 +191,6 @@ func marshalHeader(h Header) []byte {
 	binary.BigEndian.PutUint32(b[24:28], h.PacketID)
 	binary.BigEndian.PutUint16(b[28:30], h.FragIndex)
 	binary.BigEndian.PutUint16(b[30:32], h.FragCount)
-	return b
 }
 
 func parseHeader(b []byte) (Header, error) {
