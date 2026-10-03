@@ -6,8 +6,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"syscall"
@@ -78,6 +80,16 @@ func (d *Device) Configure(c *config.Config) (result error) {
 	}
 	if err := runIP("link", "set", "dev", d.Name, "mtu", fmt.Sprint(c.TUN.MTU), "txqueuelen", fmt.Sprint(c.TUN.TxQueueLen), "up"); err != nil {
 		return err
+	}
+	if c.Profile == "bip" {
+		// Fairness must act on inner flows before encryption. A bulk TCP flow
+		// must not monopolize the kernel TUN queue when outer loss shrinks the
+		// BIP flight window. This changes only the tunnel's own interface.
+		output, err := exec.Command("tc", "qdisc", "replace", "dev", d.Name, "root", "handle", "186:",
+			"fq_codel", "limit", fmt.Sprint(c.TUN.TxQueueLen), "target", "5ms", "interval", "100ms").CombinedOutput()
+		if err != nil {
+			log.Printf("TUN fair queue unavailable on %s; using kernel queue: %v %s", d.Name, err, strings.TrimSpace(string(output)))
+		}
 	}
 	if net.ParseIP(c.TUN.LocalAddr).To4() != nil {
 		if err := runIP("addr", "replace", c.TUN.LocalAddr+"/"+fmt.Sprint(c.TUN.Prefix), "peer", c.TUN.RemoteAddr, "dev", d.Name); err != nil {

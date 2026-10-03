@@ -328,6 +328,7 @@ def recovery_trial(pair, trial, scenario='blackhole3', duration=60):
         if done:done.set();thread.join()
         (OUT/f'recovery-{trial}-samples.json').write_text(json.dumps(samples))
         row['end_snapshot']=pair.sample()
+        row['tun_qdiscs']=[json.loads(run('ip','netns','exec',pair.names[i],'tc','-j','-s','qdisc','show','dev',f'ggs{166+i}' if pair.supervised else 'gx0').stdout) for i in range(2)]
         if pair.supervised:
             row['supervisor_restarts'] = [run('systemctl', 'show', unit, '-p', 'NRestarts', '--value', check=False).stdout.strip() for unit in pair.units]
         record(row)
