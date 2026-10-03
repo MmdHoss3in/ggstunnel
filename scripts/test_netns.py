@@ -56,32 +56,47 @@ def main():
                 path=tmp/f'{i}.json';path.write_text(json.dumps(cfg));path.chmod(0o600)
                 log=(tmp/f'{i}.log').open('w+');logs.append(log)
                 processes.append(subprocess.Popen(['ip','netns','exec',n,str(ROOT/'dist/ggstunnel-linux-amd64'),'-c',str(path)],stdout=log,stderr=log))
-            for attempt in range(20):
-                try:
-                    run('ip','netns','exec',names[0],'ping','-c','1','-W','1','10.77.1.2',timeout=3)
-                    break
-                except subprocess.SubprocessError:
-                    time.sleep(.2)
-            else: raise RuntimeError('Encrypted TUN never became reachable')
+            def reachable():
+                begin=time.monotonic()
+                for attempt in range(20):
+                    if any(p.poll() is not None for p in processes[:2]):
+                        raise RuntimeError('Tunnel process exited during recovery')
+                    try:
+                        run('ip','netns','exec',names[0],'ping','-c','1','-W','1','10.77.1.2',timeout=3)
+                        return round(time.monotonic()-begin,3)
+                    except subprocess.SubprocessError:
+                        time.sleep(.2)
+                raise RuntimeError('Encrypted TUN never became reachable')
+
+            def restart_pair():
+                for p in processes[:2]:p.terminate();p.wait(timeout=5)
+                for i,n in enumerate(names):
+                    processes[i]=subprocess.Popen(['ip','netns','exec',n,str(ROOT/'dist/ggstunnel-linux-amd64'),
+                                                   '-c',str(tmp/f'{i}.json')],stdout=logs[i],stderr=logs[i])
+                reachable()
+
             results=[]
             for loss in (('0%','0.2%','1%') if profile=='bip' else ('0%',)):
                 for i,n in enumerate(names):
                     dev=('ggs-ci-va','ggs-ci-vb')[i]
                     run('ip','netns','exec',n,'tc','qdisc','change','dev',dev,'root','netem','delay','40ms','loss',loss,'rate','100mbit')
                 for reverse in (False,True):
+                    # Independent controller/session state for each sample.
+                    restart_pair()
                     server=subprocess.Popen(['ip','netns','exec',names[1],'iperf3','-s','-1'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                     processes.append(server);time.sleep(.25)
-                    args=['ip','netns','exec',names[0],'iperf3','-c','10.77.1.2','-t','8','-P','4','-J']
+                    args=['ip','netns','exec',names[0],'iperf3','-c','10.77.1.2','-O','2','-t','8','-P','4','-J']
                     if reverse:args.append('-R')
                     data=json.loads(run(*args,timeout=40).stdout)
                     if 'error' in data:raise RuntimeError(data['error'])
                     rate=data['end']['sum_received']['bits_per_second']/1e6
-                    row={'profile':profile,'loss':loss,'reverse':reverse,'received_mbps':round(rate,3)}
+                    row={'profile':profile,'loss':loss,'reverse':reverse,'received_mbps':round(rate,3),
+                         'sample_sec':8,'warmup_sec':2,'base_rtt_ms':80,'link_mbps':100,'fresh_session':True}
                     print(json.dumps(row),flush=True);results.append(row)
                     if os.environ.get('GGS_RESULTS'):
                         with Path(os.environ['GGS_RESULTS']).open('a') as report:
                             report.write(json.dumps(row)+'\n')
-                    floor=10 if loss=='0%' else 1
+                    floor=30 if loss=='0%' else 1
                     if rate<floor:raise RuntimeError(f'Real TUN throughput collapsed below {floor} Mbps')
                     server.wait(timeout=5)
             if profile == 'bip':
@@ -89,18 +104,6 @@ def main():
                     for i,n in enumerate(names):
                         run('ip','netns','exec',n,'tc','qdisc','change','dev',('ggs-ci-va','ggs-ci-vb')[i],
                             'root','netem','delay',delay,'loss',loss,'rate','100mbit')
-
-                def reachable():
-                    begin=time.monotonic()
-                    for attempt in range(15):
-                        if any(p.poll() is not None for p in processes[:2]):
-                            raise RuntimeError('Tunnel process exited during recovery')
-                        try:
-                            run('ip','netns','exec',names[0],'ping','-c','1','-W','1','10.77.1.2',timeout=3)
-                            return round(time.monotonic()-begin,3)
-                        except subprocess.SubprocessError:
-                            time.sleep(.2)
-                    raise RuntimeError('Tunnel did not recover')
 
                 def report(case, **values):
                     row=dict(profile=profile,case=case,status='pass',**values)
@@ -110,7 +113,7 @@ def main():
                         with Path(destination).open('a') as output:output.write(json.dumps(row)+'\n')
 
                 shape()
-                reachable()
+                restart_pair()
                 server=subprocess.Popen(['ip','netns','exec',names[1],'iperf3','-s','-1'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                 processes.append(server);time.sleep(.25)
                 client=subprocess.Popen(['ip','netns','exec',names[0],'iperf3','-c','10.77.1.2','-t','14','-P','1','-J'],
