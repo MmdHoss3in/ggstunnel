@@ -204,10 +204,10 @@ func TestBIPWirePathsLossDuplicateReorder(t *testing.T) {
 				for i := 0; i < count; i++ {
 					payload := make([]byte, 8)
 					binary.BigEndian.PutUint64(payload, uint64(i+1))
-					if err := a.Send(payload); err != nil {
+					if err := a.SendContext(ctx, payload); err != nil {
 						t.Fatal(err)
 					}
-					if err := b.Send(append([]byte(nil), payload...)); err != nil {
+					if err := b.SendContext(ctx, append([]byte(nil), payload...)); err != nil {
 						t.Fatal(err)
 					}
 				}
