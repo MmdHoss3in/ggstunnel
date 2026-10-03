@@ -57,6 +57,8 @@ type pendingData struct {
 	deadline time.Time
 	mode     byte
 	index    int
+	sacked   int
+	fast     bool
 }
 type sackWindow struct {
 	init  bool
@@ -486,11 +488,13 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 	fast := false
 	clean := 0
 	var oldest time.Time
+	var delivered []uint32
 	accept := func(seq uint32) {
 		p := b.pending[seq]
 		if p == nil {
 			return
 		}
+		delivered = append(delivered, seq)
 		b.traceRecord(traceEvent{At: now, Event: "ack_accept", Seq: seq, Ack: ack, Sack: bits, Mode: p.mode, Retries: p.item.retries, AgeMS: float64(now.Sub(p.sent)) / float64(time.Millisecond)})
 		fast = fast || p.mode == pendingModeFast
 		if b.tuner != nil {
@@ -539,6 +543,7 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 		}
 	}
 
+	b.detectSACKLoss(delivered, now)
 	if b.tuner != nil && clean > 0 {
 		// Include the oldest clean packet's residence time in a cumulative
 		// ACK. The newest packet alone systematically hides batching delay,
