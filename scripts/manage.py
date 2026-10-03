@@ -321,7 +321,7 @@ def diagnose(name):
     path=dest/(name+'-'+stamp+'-'+str(time.time_ns())+'.txt')
     chunks=[f'ggstunnel {VERSION}; transport={c["profile"]}; role={c["role"]}\n']
     for cmd in [[binary(),'-version'],['uname','-a'],['cat','/etc/os-release'],['free','-m'],['systemctl','status','--no-pager',unit(name)],
-                ['ip','-s','link','show',c['tun']['name']],['ip','route','get',c['tun']['remote_addr']],
+                ['ip','-s','link','show',c['tun']['name']],['tc','-s','qdisc','show','dev',c['tun']['name']],['ip','route','get',c['tun']['remote_addr']],
                 ['ping','-I',c['tun']['name'],'-c','10','-W','2',c['tun']['remote_addr']],
                 ['journalctl','-u',unit(name),'-n','120','--no-pager']]:
         try:
