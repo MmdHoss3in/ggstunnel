@@ -45,7 +45,7 @@ After a three-second blackhole, the existing framed TCP flow resumed 0.299 secon
 
 The [standard short validation run](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37158185911) also passed: fuzzing three authenticated parser/controller targets, real raw ICMP and TUN cancellation tests, nine concurrent BIP peers, all five carriers through the shaped TUN path, and installation/verification of the actual generated archive. Native Ubuntu 22.04 amd64 and Ubuntu 24.04 arm64 systemd/race checks passed. The longer extended release matrix and publication were intentionally skipped for this focused draft PR; they remain required on main and release tags. BIP no-loss samples in this second run were 78.092 / 58.065Mbps, again showing short-sample variation.
 
-No supplied reference executable and no local Go/Python runtime was executed for these tests. The code remains an unpublished candidate in [draft PR #1](https://github.com/MmdHoss3in/ggstunnel/pull/1); the published Stable release remains v0.3.0. Subsequent documentation-only edits do not change the tested executable source.
+No supplied reference executable and no local Go/Python runtime was executed for these tests. The code is a field-test candidate in [draft PR #1](https://github.com/MmdHoss3in/ggstunnel/pull/1); the published Stable release remains v0.3.0. The [v0.3.1-rc1 pre-release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.1-rc1) is published only after its tagged-source release workflow passes. Subsequent documentation-only edits do not change the tested executable source.
 
 ## Remaining work, in priority order
 

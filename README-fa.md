@@ -1,12 +1,23 @@
 # ggstunnel — تانل رمز‌شدهٔ ایران ↔ خارج
 
-این شاخه شامل نامزد **`v0.3.1-rc1`** برای اصلاح بازیابی BIP پس از سکوت همتا است و هنوز Release منتشرشده نیست. نسخه منتشرشده قبلی `v0.3.0` است. [شرح اصلاح و مراحل بعد](docs/stability-recovery.md)؛ اعداد آزمون‌های 0.3.0 در ادامه، نتیجه آزمون این نامزد محسوب نمی‌شوند.
+این شاخه شامل نامزد **`v0.3.1-rc1`** برای آزمایش میدانی اصلاح بازیابی BIP پس از سکوت همتا است. نسخه Stable قبلی `v0.3.0` است. [شرح اصلاح و مراحل بعد](docs/stability-recovery.md)؛ اعداد آزمون‌های 0.3.0 در ادامه، نتیجه آزمون این نامزد محسوب نمی‌شوند.
 
 [![Linux validation](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml/badge.svg)](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml)
 
 ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سرورها و عبور ترافیک سرویس‌هایی مثل Xray است. هسته با Go و منوی مدیریت با Python نوشته شده است. پروتکل اصلی **BIP5 روی ICMP** است؛ TCP، UDP، ICMP خام و GRE اختصاصی نیز پشتیبانی می‌شوند.
 
 **نسخهٔ فعلی: `v0.3.0`، Stable با دامنه آزمون مستند ابری.** تست‌های خودکار جای آزمایش مسیر واقعی ایران–خارج یا پایداری چندروزه را نمی‌گیرند. سرعت تضمین‌شده یا ادعای عبور از هر نوع محدودیت شبکه نداریم.
+
+## نصب نامزد آزمایشی v0.3.1-rc1
+
+این نسخه برای آزمایش میدانی است؛ افت سرعت زیر packet loss هنوز حل نشده و بازیابی کامل ممکن است اتصال کاربران را قطع و وصل کند. روی **هر دو سرور**، ابتدا خارج و سپس ایران، اجرا کنید. نصب کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند.
+
+```bash
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.1-rc1/install.sh -o /tmp/ggstunnel-rc1-install.sh &&
+sudo bash /tmp/ggstunnel-rc1-install.sh update
+```
+
+نیاز به Go یا ساخت باینری روی سرور نیست. [Release آزمایشی](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.1-rc1) شامل بسته و SHA256SUMS است؛ اینستالر checksum آرشیو و بسته را کنترل می‌کند. بازکردن منو با `sudo ggstunnel` پیش‌نیازها را دوباره بررسی نمی‌کند. بازگشت به نسخه قبلی: `sudo ggstunnel rollback`.
 
 ## نصب از GitHub Release
 

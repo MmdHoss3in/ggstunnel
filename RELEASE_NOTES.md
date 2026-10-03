@@ -1,6 +1,6 @@
 # Release notes
 
-## v0.3.1-rc1 — unpublished recovery candidate
+## v0.3.1-rc1 — field-test recovery candidate
 
 - Retry authenticated HELLO/challenge exchanges after established-peer silence. Confirmation of the same identity retains ordered flight data, replay state and encryption counters, and resumes paced retry scheduling.
 - Bound established-peer silence with transport.bip_dead_timeout_sec (default 90 seconds, extended beyond a longer explicit legacy FAST TTL, independent of idle_timeout_sec). On expiry, request engine recovery with a fresh codec/key identity. Kernel echo reflections cannot refresh this deadline. Hard recovery can interrupt application connections while recreating TUN/forward listeners.
@@ -8,7 +8,7 @@
 - Ask for a transport port only for TCP/UDP; retain the unused join-code field for raw-carrier compatibility.
 - Add a cloud before/after regression against v0.3.0, repeated race checks on amd64/arm64, reflection/deadline tests, manager checks and real TUN delay/loss/outage checks. Candidate results are separate from earlier Stable measurements.
 
-This candidate does not implement independent BIP streams, automatic PMTU or a validated multi-day reliability model, and cannot recover a permanently blocked path. Review docs/stability-recovery.md before field testing. No new Stable release is implied by this branch.
+This pre-release does not implement independent BIP streams, automatic PMTU or a validated multi-day reliability model, and cannot recover a permanently blocked path. Review docs/stability-recovery.md before field testing. It is a field-test candidate, not a new Stable release. Loss sensitivity remains severe: the focused 100Mbps / 80ms run measured 1.835–3.015Mbps with 1% injected loss. Passing connectivity checks is not a high-throughput guarantee.
 
 ## v0.3.0 — authenticated wider window, bounded recovery and installer transactions
 
