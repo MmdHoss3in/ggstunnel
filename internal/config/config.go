@@ -151,7 +151,7 @@ func (c *Config) ApplyDefaults() {
 		mtu, txq, queue, payload = 1348, 256, 8192, 1348
 	}
 	if c.Profile == "bip" && c.TUN.TxQueueLen == 0 {
-		txq = 64
+		txq = 1024
 	}
 	if c.TUN.MTU == 0 {
 		c.TUN.MTU = mtu

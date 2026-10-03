@@ -120,7 +120,7 @@ def make_config(index, profile, server, peer, port, psk, role, local=None):
     return dict(config_version=1, mode='tun', role=role, profile=profile, psk=psk,
         real=dict(local_ip=local, peer_ip=remote, listen_addr=f'{local}:{port}', peer_addr=f'{remote}:{port}'),
         tun=dict(name=f'ggs{index:02d}', local_addr=b if client else a, remote_addr=a if client else b,
-                 prefix=30, mtu=1280, tx_queue_len=64 if profile=='bip' else 256, routes=[]),
+                 prefix=30, mtu=1280, tx_queue_len=1024 if profile=='bip' else 256, routes=[]),
         transport=dict(l4_port=port, heartbeat_sec=2, idle_timeout_sec=30, sock_buf=4 << 20, bip_pull_burst=128, bip_max_retries=8),
         performance=dict(profile='stable', queue_size=8192, max_frame_payload=1280),
         tuner=dict(mode='adaptive' if profile == 'bip' else 'manual', max_pps=10000, max_burst=128, unlimited_rate=True),
@@ -601,7 +601,7 @@ def optimize_existing():
         c.setdefault('tuner',{}).update(mode='adaptive',unlimited_rate=True,max_burst=128)
         c.setdefault('transport',{}).update(bip_pull_burst=128,bip_max_retries=8)
         c['performance']['queue_size']=max(8192,c['performance'].get('queue_size',8192))
-        c['tun']['tx_queue_len']=min(64,c['tun'].get('tx_queue_len',64))
+        c['tun']['tx_queue_len']=max(1024,c['tun'].get('tx_queue_len',1024))
         save_config(c,True)
     print('BIP performance defaults applied; both peers must run BIP5.')
 

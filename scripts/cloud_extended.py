@@ -245,6 +245,15 @@ class Pair:
         thread = threading.Thread(target=poll); thread.start()
         return done, thread, samples
 
+    def tun_drops(self):
+        values=[]
+        for i in range(2):
+            dev=f'ggs{166+i}' if self.supervised else 'gx0'
+            link=json.loads(run('ip','netns','exec',self.names[i],'ip','-j','-s','link','show','dev',dev).stdout)[0]
+            stats=link.get('stats64',link.get('stats',{}))
+            values.append(stats['tx']['dropped'])
+        return values
+
     def __exit__(self, *unused):
         for p in self.children: stop(p)
         for i in range(2): self.stop_peer(i)
@@ -501,7 +510,7 @@ def capacity(shard):
                         pair.restart();echo=pair.probe_server();probe=pair.probe(25)
                         s,c=pair.iperf('10.77.1.2',seconds=20,warmup=5,reverse=reverse,streams=8)
                         row.update(pair.finish_iperf(s,c,40));data=pair.finish_probe(probe,40)
-                        row.update(verified_frames=data['verified_frames'],max_gap_sec=data['max_gap_sec'],end_snapshot=pair.sample())
+                        row.update(verified_frames=data['verified_frames'],max_gap_sec=data['max_gap_sec'],end_snapshot=pair.sample(),kernel_tun_tx_drops=pair.tun_drops())
                         floor=min(200,.65*direct) if rate>=500 else .65*direct
                         row['target_mbps']=floor
                         if row['received_mbps']<floor or data['verified_frames']<20 or data['max_gap_sec']>5:raise RuntimeError('Capacity or concurrent integrity floor failed')
@@ -525,7 +534,7 @@ def capacity_hold():
             rates=measured.pop('receiver_intervals_mbps')
             row.update(measured)
             data=pair.finish_probe(probe,40)
-            row.update(verified_frames=data['verified_frames'],max_gap_sec=data['max_gap_sec'])
+            row.update(verified_frames=data['verified_frames'],max_gap_sec=data['max_gap_sec'],kernel_tun_tx_drops=pair.tun_drops())
             if len(rates)<590:raise RuntimeError('Missing receiver interval evidence')
             windows=[statistics.median(rates[i:i+60]) for i in range(0,len(rates)-59,60)]
             row.update(receiver_intervals=len(rates),window_medians_mbps=windows,
