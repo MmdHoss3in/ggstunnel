@@ -391,6 +391,10 @@ WantedBy=multi-user.target
 def symlink(target,path):
     tmp=path.with_name(path.name+'.new');tmp.unlink(missing_ok=True);tmp.symlink_to(target);os.replace(tmp,path)
 
+def restore_unit(path, content):
+    if content is None:path.unlink(missing_ok=True)
+    else:atomic(path,content,0o644)
+
 def install(source):
     source=Path(source).resolve();a=arch()
     # Verify the complete package before executing its binary or changing files.
@@ -418,15 +422,27 @@ def install(source):
     if not release.exists():shutil.copytree(source,release,ignore=shutil.ignore_patterns('develop-state','__pycache__','.git'))
     previous=(OPT/'current').resolve() if (OPT/'current').exists() else None
     running=[n for n in configs() if active(n)]
-    atomic(UNITS/'ggstunnel@.service',UNIT.replace('BINARY',exe.name),0o644)
-    symlink(release,OPT/'current')
-    atomic('/usr/local/bin/ggstunnel', '#!/bin/sh\nexec python3 /opt/ggstunnel/current/scripts/manage.py "$@"\n',0o755)
-    run(['systemctl','daemon-reload'])
+    unit_path=UNITS/'ggstunnel@.service'
+    old_unit=unit_path.read_text() if unit_path.exists() else None
+    new_unit=UNIT.replace('BINARY',exe.name)
+    # Keep the previous installed unit for an upgrade from older packages
+    # which did not save this generated release metadata.
+    if previous and old_unit is not None and not (previous/'ggstunnel@.service').exists():
+        atomic(previous/'ggstunnel@.service',old_unit,0o644)
+    atomic(release/'ggstunnel@.service',new_unit,0o644)
     try:
+        atomic(unit_path,new_unit,0o644)
+        symlink(release,OPT/'current')
+        atomic('/usr/local/bin/ggstunnel', '#!/bin/sh\nexec python3 /opt/ggstunnel/current/scripts/manage.py "$@"\n',0o755)
+        run(['systemctl','daemon-reload'])
         for n in running:action('restart',n)
     except Exception:
         if previous:symlink(previous,OPT/'current')
-        for n in running:run(['systemctl','restart',unit(n)],check=False)
+        else:(OPT/'current').unlink(missing_ok=True)
+        restore_unit(unit_path,old_unit)
+        run(['systemctl','daemon-reload'],check=False)
+        if previous:
+            for n in running:run(['systemctl','restart',unit(n)],check=False)
         raise
     if previous and previous!=release:symlink(previous,OPT/'previous')
     print('Installed',release_version,'Run: sudo ggstunnel')
@@ -437,11 +453,18 @@ def rollback():
     previous=target.resolve();current=(OPT/'current').resolve()
     for c in configs().values():validate(c,previous/'dist'/('ggstunnel-linux-'+arch()))
     running=[n for n in configs() if active(n)]
-    symlink(previous,OPT/'current')
+    unit_path=UNITS/'ggstunnel@.service'
+    old_unit=unit_path.read_text() if unit_path.exists() else None
+    saved_unit=previous/'ggstunnel@.service'
     try:
+        if saved_unit.exists():restore_unit(unit_path,saved_unit.read_text())
+        symlink(previous,OPT/'current')
+        run(['systemctl','daemon-reload'])
         for n in running:action('restart',n)
     except Exception:
         symlink(current,OPT/'current')
+        restore_unit(unit_path,old_unit)
+        run(['systemctl','daemon-reload'],check=False)
         for n in running:run(['systemctl','restart',unit(n)],check=False)
         raise
     symlink(current,OPT/'previous');print('Rolled back executable/manager; configuration retained')

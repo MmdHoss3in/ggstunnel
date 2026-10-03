@@ -307,15 +307,19 @@ func TestBIPQueueAcceptanceAndReflection(t *testing.T) {
 	body, _ := sender.encode(p)
 	receiver.handle(body, time.Now())
 	ack, _ := receiver.takeAckForSend()
-	if ack != 0 {
-		t.Fatal("full queue incorrectly acknowledged")
+	if ack != 1 || string(receiver.rxHold[1]) != "real" {
+		t.Fatal("acknowledged frame was not retained under consumer pressure")
 	}
 	<-receiver.rx
+	receiver.drainRX()
 	p.number = 2
 	body, _ = sender.encode(p)
 	receiver.handle(body, time.Now())
 	if got := <-receiver.rx; string(got) != "real" {
-		t.Fatal("retry not delivered")
+		t.Fatal("retained frame not delivered")
+	}
+	if len(receiver.rx) != 0 || len(receiver.rxHold) != 0 {
+		t.Fatal("duplicate retry was delivered or retained")
 	}
 	ack, _ = receiver.takeAckForSend()
 	if ack != 1 {

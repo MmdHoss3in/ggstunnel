@@ -99,13 +99,19 @@ class ManagerTests(unittest.TestCase):
    return p
   with patch.object(m,'OPT',opt),patch.object(m,'UNITS',units),patch.object(m,'atomic',fake_atomic),patch.object(m,'run',execute),patch.object(m,'wait_service',lambda n:None):
    m.install(source);first=(opt/'current').resolve()
+   first_unit=(units/'ggstunnel@.service').read_text()
    (source/'scripts/manage.py').write_text('# manager updated fixture');manifest()
-   m.install(source);second=(opt/'current').resolve();self.assertNotEqual(first,second)
+   with patch.object(m,'UNIT',m.UNIT.replace('RestartSec=3','RestartSec=4')):m.install(source)
+   second=(opt/'current').resolve();self.assertNotEqual(first,second)
+   self.assertIn('RestartSec=4',(units/'ggstunnel@.service').read_text())
    self.assertEqual(self.running,{'ggs01'});self.assertEqual(self.enabled,{'ggs01','ggs02'})
    m.rollback();self.assertEqual((opt/'current').resolve(),first)
+   self.assertEqual((units/'ggstunnel@.service').read_text(),first_unit)
    (source/'scripts/manage.py').write_text('# next fixture');manifest();self.fail_restart=True
-   with self.assertRaises(RuntimeError):m.install(source)
+   with patch.object(m,'UNIT',m.UNIT.replace('RestartSec=3','RestartSec=5')):
+    with self.assertRaises(RuntimeError):m.install(source)
    self.assertEqual((opt/'current').resolve(),first)
+   self.assertEqual((units/'ggstunnel@.service').read_text(),first_unit)
    (source/'scripts/manage.py').write_text('# tampered')
    with self.assertRaises(ValueError):m.install(source)
 
