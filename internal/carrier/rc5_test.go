@@ -102,6 +102,37 @@ func TestPathReturnDoesNotResetRetryBudget(t *testing.T) {
 	}
 }
 
+func TestWideSACKWrapHighestSlot(t *testing.T) {
+	base := ^uint32(0) - 32
+	highest := base
+	for i := 0; i < 8192; i++ {
+		highest = nextSequence(highest)
+	}
+	b := spanSender(t, base)
+	b.peerSpan = bipWideSpan
+	b.rxAck = sackWindow{init: true, max: base, seen: make(map[uint32]bool)}
+	b.recordRXSeqLocked(highest)
+	extra := b.ackExtension(base)
+	if len(extra) != 1016 || binary.BigEndian.Uint64(extra[1008:]) != 1<<63 {
+		t.Fatal("wrapped highest slot did not use the negotiated SACK horizon")
+	}
+	b.queuePending(outData{seq: highest}, pendingModeRequest, time.Now())
+	b.processWideAckAt(base, 0, extra, time.Now().Add(time.Second))
+	if len(b.pending) != 0 {
+		t.Fatal("wrapped highest slot was not acknowledged")
+	}
+	b.dataSeq = highest
+	b.deliverOne(8, 1, 1, pendingModeRequest, time.Now())
+	if b.dataSeq != highest {
+		t.Fatal("wrapped sender crossed the cumulative ACK horizon")
+	}
+	b.processPeerAckAt(highest, 0, time.Now())
+	b.deliverOne(8, 1, 1, pendingModeRequest, time.Now())
+	if b.dataSeq != nextSequence(highest) {
+		t.Fatal("wrapped sender did not resume after hole recovery")
+	}
+}
+
 func TestTCPBatchPreservesFramesAndFlushesIsolatedPacket(t *testing.T) {
 	c := simConfig("server")
 	x := NewTCP(c)

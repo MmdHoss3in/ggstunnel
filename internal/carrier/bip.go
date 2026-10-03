@@ -147,8 +147,8 @@ type BIP struct {
 	rxAck                                                                                            sackWindow
 	pending                                                                                          map[uint32]*pendingData
 	fastToken                                                                                        uint32
-	lastPeerActivity time.Time
-	pathSuspended atomic.Bool
+	lastPeerActivity                                                                                 time.Time
+	pathSuspended                                                                                    atomic.Bool
 	fastDeadline, fastUntil, needPullSince, remotePullUntil, lastPull                                time.Time
 	lastHello, lastProbe, lastNeedPull, lastAck, lastIdle                                            time.Time
 	fastHealthy, pullActive, compatActive                                                            atomic.Bool

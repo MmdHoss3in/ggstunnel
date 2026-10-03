@@ -15,7 +15,7 @@ import hashlib
 root=Path('.')
 lines=[]
 for p in sorted(root.rglob('*')):
-    if not p.is_file() or p==Path('SHA256SUMS') or any(x in p.parts for x in ('__pycache__','develop-state','.git','.github','artifacts')):
+    if not p.is_file() or p==Path('SHA256SUMS') or any(x in p.parts for x in ('__pycache__','develop-state','.git','.github','artifacts','extended-results','boundary-results','collected','release-source')):
         continue
     lines.append(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.as_posix())
 Path('SHA256SUMS').write_text('\n'.join(lines)+'\n')

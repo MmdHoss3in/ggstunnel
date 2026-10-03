@@ -62,6 +62,14 @@ jobs:
           tar --exclude='./.git' --exclude='./.github' --exclude='./artifacts' --exclude='./extended-results' --exclude='__pycache__' --transform='s,^\.,ggstunnel,' -czf artifacts/ggstunnel-linux.tar.gz .
           cd artifacts
           sha256sum ggstunnel-linux.tar.gz > SHA256SUMS
+      - name: Verify and install the actual release archive
+        run: |
+          WORK=$(mktemp -d)
+          tar -xzf artifacts/ggstunnel-linux.tar.gz -C "$WORK"
+          (cd "$WORK/ggstunnel" && sha256sum --check SHA256SUMS)
+          printf '0\n' | sudo bash "$WORK/ggstunnel/setup.sh" install
+          sudo env GITHUB_ACTIONS=true python3 "$WORK/ggstunnel/scripts/smoke_systemd.py"
+          printf '0\n' | sudo /usr/local/bin/ggstunnel
       - uses: actions/upload-artifact@v4
         with:
           name: ggstunnel-linux

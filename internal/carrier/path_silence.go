@@ -7,9 +7,13 @@ import "time"
 // than exhaust every frame's retry budget during an arbitrarily long blackout.
 // A path that still responds but fails to deliver data remains budget-limited.
 func (b *BIP) pathUnresponsive(now time.Time) bool {
-	if b.lastPeerActivity.IsZero() { return false }
+	if b.lastPeerActivity.IsZero() {
+		return false
+	}
 	quiet := time.Duration(b.cfg.Transport.BIPFastTTLMS) * time.Millisecond
-	if b.tuner != nil { quiet = max(quiet, 3*b.tuner.rto) }
+	if b.tuner != nil {
+		quiet = max(quiet, 3*b.tuner.rto)
+	}
 	return now.Sub(b.lastPeerActivity) >= quiet
 }
 
@@ -18,5 +22,7 @@ func (b *BIP) pathUnresponsive(now time.Time) bool {
 func (b *BIP) observePeerActivity(now time.Time) {
 	wasSilent := b.pathUnresponsive(now)
 	b.lastPeerActivity = now
-	if wasSilent { b.expeditePathRetries(now) }
+	if wasSilent {
+		b.expeditePathRetries(now)
+	}
 }

@@ -18,7 +18,7 @@ type Carrier interface {
 }
 
 // RuntimeStats is optional carrier telemetry used by the engine's periodic
-// status line. Counters are cumulative since process start.
+// status line. Counters are cumulative for the current transport instance.
 type RuntimeStats struct {
 	WireTxBytes uint64 `json:"wire_tx_bytes"`
 	WireRxBytes uint64 `json:"wire_rx_bytes"`
@@ -50,7 +50,7 @@ type RuntimeStats struct {
 	Retransmits     uint64 `json:"retransmits"`
 	FastPromotions  uint64 `json:"fast_promotions"`
 	FastDemotions   uint64 `json:"fast_demotions"`
-	PathSuspended bool `json:"path_suspended"`
+	PathSuspended   bool   `json:"path_suspended"`
 	FastHealthy     bool   `json:"fast_healthy"`
 	PullActive      bool   `json:"pull_active"`
 	CompatActive    bool   `json:"compat_active"`
