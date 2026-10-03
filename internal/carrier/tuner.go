@@ -147,7 +147,9 @@ func (t *bipTuner) pathChanged() {
 	t.srtt = 0
 	t.variance = 0
 	t.rto = t.clampRTO(t.initialRTO)
-	t.threshold = t.cwnd
+	// Preserve the previous slow-start threshold too. Setting it to cwnd
+	// here would turn an early PULL->FAST transition into slow additive
+	// growth at a tiny window even though no congestion was observed.
 	t.credit = math.Min(t.credit, float64(t.burst()))
 	t.resets++
 }

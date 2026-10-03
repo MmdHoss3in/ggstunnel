@@ -9,14 +9,16 @@ func (b *BIP) scheduleAck(p wirePacket, now time.Time, immediate bool) {
 	b.ackType, b.ackID, b.ackTuple = responseType(p), p.id, p.tuple
 	b.ackCount++
 	if b.ackDue.IsZero() {
-		b.ackDue = now.Add(time.Duration(b.cfg.Transport.BIPAckMS)*time.Millisecond)
+		b.ackDue = now.Add(time.Duration(b.cfg.Transport.BIPAckMS) * time.Millisecond)
 	}
-	if immediate || b.ackCount >= 16 { b.flushAck(now) }
+	if immediate || b.ackCount >= 16 {
+		b.flushAck(now)
+	}
 }
 
 func (b *BIP) flushAck(now time.Time) {
 	if err := b.send(b.ackType, b.ackID, b.ackTuple, bipKindAck, 0, 0, nil, b.active); err != nil {
-		b.ackDue = now.Add(time.Duration(b.cfg.Transport.BIPAckMS)*time.Millisecond)
+		b.ackDue = now.Add(time.Duration(b.cfg.Transport.BIPAckMS) * time.Millisecond)
 		return
 	}
 	b.ackDue = time.Time{}

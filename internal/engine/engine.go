@@ -171,13 +171,17 @@ func (e *Engine) tunToCarrier(ctx context.Context) error {
 				return err
 			}
 			var sendErr error
-			if sender, ok := e.carrier.(interface { SendContext(context.Context, []byte) error }); ok {
+			if sender, ok := e.carrier.(interface {
+				SendContext(context.Context, []byte) error
+			}); ok {
 				sendErr = sender.SendContext(ctx, w)
 			} else {
 				sendErr = e.carrier.Send(w)
 			}
 			if sendErr != nil {
-				if ctx.Err() != nil { return ctx.Err() }
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				e.drops.Add(1)
 				continue
 			}

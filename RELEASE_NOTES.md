@@ -9,6 +9,7 @@ This release candidate keeps the BIP5 wire format. Upgrade both peers to benefit
 - Batch dedicated ACKs while preserving authenticated ICMP reply tuples and immediate duplicate acknowledgements.
 - Replace full pending-map timeout scans with an indexed deadline heap. Remove acknowledged entries immediately.
 - Use current time, rather than an aged ticker timestamp, for scheduling.
+- Keep slow start across healthy path transitions, stop sustaining PULL polling once FAST works, and use nonblocking raw sends so socket pressure cannot block ACK processing.
 - Validate the complete release manifest before executing the candidate binary.
 - Open the installed menu offline with `sudo ggstunnel`, `setup.sh menu`, or `install.sh menu`. Plain setup opens the existing menu; explicit install/update handles packages only when missing.
 - Publish both Linux amd64 and arm64 binaries, full source, and SHA256 manifests in one release archive.

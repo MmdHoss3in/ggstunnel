@@ -84,12 +84,12 @@ type PacketIO interface {
 }
 
 type BIP struct {
-	retryHeap pendingHeap
-	closed chan struct{}
-	ackDue time.Time
-	ackCount int
-	ackType byte
-	ackID, ackTuple uint16
+	retryHeap                                                                                        pendingHeap
+	closed                                                                                           chan struct{}
+	ackDue                                                                                           time.Time
+	ackCount                                                                                         int
+	ackType                                                                                          byte
+	ackID, ackTuple                                                                                  uint16
 	nextPullRetryCheck                                                                               time.Time
 	pullRate                                                                                         float64
 	pullSampleAt                                                                                     time.Time
@@ -241,7 +241,9 @@ func (b *BIP) Start(ctx context.Context) error {
 	if err = syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_HDRINCL, 1); err != nil {
 		return fail(err)
 	}
-	if err = syscall.SetsockoptTimeval(fd, syscall.SOL_SOCKET, syscall.SO_SNDTIMEO, &syscall.Timeval{Sec: 1}); err != nil {
+	// A congested socket must not stall the actor (including ACK processing)
+	// for a full second. Failed DATA sends stay pending for bounded retry.
+	if err = syscall.SetNonblock(fd, true); err != nil {
 		return fail(err)
 	}
 	_ = r.SetReadBuffer(b.cfg.Transport.SockBuf)
@@ -343,7 +345,9 @@ func (b *BIP) readLoop(ctx context.Context) {
 }
 func (b *BIP) Close() error {
 	b.closeOnce.Do(func() {
-		if b.closed != nil { close(b.closed) }
+		if b.closed != nil {
+			close(b.closed)
+		}
 		if b.cancel != nil {
 			b.cancel()
 		}
@@ -540,7 +544,9 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 func (b *BIP) queuePending(x outData, mode byte, now time.Time) {
 	b.ackMu.Lock()
 	defer b.ackMu.Unlock()
-	if old := b.pending[x.seq]; old != nil { b.removePending(old) }
+	if old := b.pending[x.seq]; old != nil {
+		b.removePending(old)
+	}
 	p := &pendingData{item: x, sent: now, mode: mode, index: -1}
 	if b.tuner != nil {
 		p.deadline = now.Add(b.tuner.timeout(x.retries))
@@ -887,7 +893,7 @@ func (b *BIP) deliverOne(typ byte, id, tuple uint16, mode byte, now time.Time) {
 	if mode == pendingModePull {
 		flags |= bipFlagPulled
 	}
-	if len(b.tx) > 0 {
+	if len(b.tx) > 0 && !(mode == pendingModePull && b.fastHealthy.Load()) {
 		flags |= bipFlagMore
 	}
 	_ = b.send(typ, id, tuple, bipKindData, flags, x.seq, x.data, b.active)

@@ -19,6 +19,8 @@ def run(*args, **kw):
 
 def main():
     if os.geteuid()!=0: raise RuntimeError('Requires root on a disposable Linux runner')
+    profile=os.environ.get('GGS_TEST_PROFILE','bip')
+    if profile not in ('bip','tcp','udp','icmp','gre'):raise ValueError('Unknown test profile')
     names=['ggs-ci-a','ggs-ci-b']
     processes=[]
     created=[]
@@ -38,8 +40,11 @@ def main():
             for i,n in enumerate(names):
                 cfg=json.loads((ROOT/'examples'/('server.json' if i==0 else 'client.json')).read_text())
                 cfg['psk']=key
+                cfg['profile']=profile
                 cfg['real']['local_ip']=f'192.0.2.{i+1}'
                 cfg['real']['peer_ip']=f'192.0.2.{2-i}'
+                cfg['real']['listen_addr']=f'192.0.2.{i+1}:24443'
+                cfg['real']['peer_addr']=f'192.0.2.{2-i}:24443'
                 cfg['tun']['name']='ggsci0'
                 cfg['tun']['local_addr']=f'10.77.1.{i+1}'
                 cfg['tun']['remote_addr']=f'10.77.1.{2-i}'
@@ -54,7 +59,7 @@ def main():
                     time.sleep(.2)
             else: raise RuntimeError('Encrypted TUN never became reachable')
             results=[]
-            for loss in ('0%','0.2%'):
+            for loss in (('0%','0.2%') if profile=='bip' else ('0%',)):
                 for i,n in enumerate(names):
                     dev=('ggs-ci-va','ggs-ci-vb')[i]
                     run('ip','netns','exec',n,'tc','qdisc','change','dev',dev,'root','netem','delay','40ms','loss',loss,'rate','100mbit')
@@ -66,11 +71,12 @@ def main():
                     data=json.loads(run(*args,timeout=40).stdout)
                     if 'error' in data:raise RuntimeError(data['error'])
                     rate=data['end']['sum_received']['bits_per_second']/1e6
-                    row={'loss':loss,'reverse':reverse,'received_mbps':round(rate,3)}
+                    row={'profile':profile,'loss':loss,'reverse':reverse,'received_mbps':round(rate,3)}
                     print(json.dumps(row),flush=True);results.append(row)
-                    if rate<1:raise RuntimeError('Real TUN throughput collapsed below 1 Mbps')
+                    floor=10 if loss=='0%' else 1
+                    if rate<floor:raise RuntimeError(f'Real TUN throughput collapsed below {floor} Mbps')
                     server.wait(timeout=5)
-            print('PASS: real encrypted TUN, both directions, 80ms base RTT, 100Mbps netem link, with/without loss')
+            print(f'PASS: {profile}, real encrypted TUN, both directions, 80ms base RTT, 100Mbps netem link')
         finally:
             for p in processes:
                 if p.poll() is None:p.terminate()
