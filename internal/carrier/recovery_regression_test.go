@@ -18,7 +18,7 @@ func TestSmallBacklogRetainsLargeFlightWindow(t *testing.T) {
 	}
 	b := x.(*BIP)
 	defer b.Close()
-	if cap(b.tx) != 256 || b.window() != 4096 || b.tuner.maxWindow != 4096 {
+	if cap(b.tx) != 64 || b.window() != 4096 || b.tuner.maxWindow != 4096 {
 		t.Fatal("queue latency bound must not shrink the high-BDP flight window")
 	}
 }

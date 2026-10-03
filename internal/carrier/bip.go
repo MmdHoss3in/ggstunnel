@@ -147,6 +147,8 @@ type BIP struct {
 	rxAck                                                                                            sackWindow
 	pending                                                                                          map[uint32]*pendingData
 	fastToken                                                                                        uint32
+	lastPeerActivity time.Time
+	pathSuspended atomic.Bool
 	fastDeadline, fastUntil, needPullSince, remotePullUntil, lastPull                                time.Time
 	lastHello, lastProbe, lastNeedPull, lastAck, lastIdle                                            time.Time
 	fastHealthy, pullActive, compatActive                                                            atomic.Bool
@@ -193,9 +195,9 @@ func NewBIP(c *config.Config) (Carrier, error) {
 	b := &BIP{tuner: newBIPTuner(c), cfg: c, local: l, peer: p, localID: sid, master: master, gate: g, rawfd: -1, id: binary.BigEndian.Uint16(seed[8:]), tx: make(chan []byte, c.Performance.QueueSize), rx: make(chan []byte, c.Performance.QueueSize), incoming: make(chan []byte, c.Performance.QueueSize), errors: make(chan error, 1), pending: make(map[uint32]*pendingData), rxAck: sackWindow{init: true, seen: make(map[uint32]bool)}, replay: frame.NewReplayGuard(65536)}
 	b.closed = make(chan struct{})
 	// The retransmission window and the unsent backlog serve different
-	// purposes. Keep at most two scheduling bursts waiting ahead of inner
-	// TCP control traffic even when the flight window can reach 4096.
-	b.tx = make(chan []byte, min(c.Performance.QueueSize, 256))
+	// purposes. Keep a small unsent backlog waiting ahead of inner
+	// TCP control traffic even when the flight window can reach 8192.
+	b.tx = make(chan []byte, min(c.Performance.QueueSize, 64))
 	b.publishTuner(time.Now())
 	return b, nil
 }
@@ -705,6 +707,8 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.pullSampleAt = time.Time{}
 	b.replay = frame.NewReplayGuard(65536)
 	b.fastUntil = time.Time{}
+	b.lastPeerActivity = time.Time{}
+	b.pathSuspended.Store(false)
 	b.fastToken = 0
 	b.needPullSince = time.Time{}
 	b.remotePullUntil = time.Time{}
@@ -836,6 +840,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 				b.fail(err)
 				return
 			}
+			b.lastPeerActivity = now
 			// Capability is accepted only with a fresh receiver-issued challenge
 			// and a verified proof. Legacy peers ignore this flag and advertise 0.
 			if p.flags&bipFlagWideSACK != 0 {
@@ -862,6 +867,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 	} else {
 		b.processPeerAckAt(p.ack, p.sack, now)
 	}
+	b.observePeerActivity(now)
 	b.recoverPersistentHole(p.ack, p.sack, p.payload, p.kind == bipKindAck, now)
 	b.traceRecord(traceEvent{At: now, Event: "wire_rx", Seq: p.token, Ack: p.ack, Sack: p.sack, Kind: p.kind, Type: p.typ})
 	switch p.kind {
@@ -1100,7 +1106,9 @@ func (b *BIP) run(ctx context.Context) {
 			if path != 0 {
 				b.tuningPath = path
 			}
-			for i := 0; i < 16; i++ {
+			suspended := b.pathUnresponsive(now)
+			b.pathSuspended.Store(suspended)
+			for i := 0; i < 16 && !suspended; i++ {
 				if b.tuner != nil && !b.tuner.allow(now, false) {
 					break
 				}
@@ -1129,7 +1137,7 @@ func (b *BIP) run(ctx context.Context) {
 				// Path probes/TTL independently decide when to fall back.
 				_ = b.send(8, id, s, bipKindData, bipFlagMore, pd.item.seq, pd.item.data, b.active)
 			}
-			if fast || compat {
+			if (fast || compat) && !suspended {
 				quota := b.cfg.Tuner.MaxBurst
 				if compat {
 					rate := float64(b.cfg.Transport.BIPPullPPS)
@@ -1283,5 +1291,5 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 	b.ackMu.Lock()
 	pending := len(b.pending)
 	b.ackMu.Unlock()
-	return RuntimeStats{FastRetransmits: b.fastRetries.Load(), ReorderBuffered: b.rxBuffered.Load(), WireTxBytes: b.wireTxBytes.Load(), WireRxBytes: b.wireRxBytes.Load(), FastDataTx: b.fastDataTx.Load(), PullDataTx: b.pullDataTx.Load(), CompatDataTx: b.compatDataTx.Load(), IdleProbeTx: b.idleProbeTx.Load(), FastProbeTx: b.fastProbeTx.Load(), FastAckTx: b.fastAckTx.Load(), NeedPullTx: b.needPullTx.Load(), PullProbeTx: b.pullProbeTx.Load(), FastAckRx: b.fastAckRx.Load(), NeedPullRx: b.needPullRx.Load(), PullProbeRx: b.pullProbeRx.Load(), ReflectionsSuppressed: b.reflectionsSuppressed.Load(), PayloadFrameRx: b.payloadFrameRx.Load(), HMACFail: b.hmacFail.Load(), MalformedWire: b.malformedWire.Load(), UnknownSession: b.unknownSession.Load(), DataDuplicate: b.dataDuplicate.Load(), Pending: uint64(pending), Backlog: uint64(len(b.tx)), Retransmits: b.retransmits.Load(), PendingExpired: b.pendingExpired.Load(), PendingOverflow: b.pendingOverflow.Load(), FastPromotions: b.fastPromotions.Load(), FastDemotions: b.fastDemotions.Load(), FastHealthy: b.fastHealthy.Load(), PullActive: b.pullActive.Load(), CompatActive: b.compatActive.Load(), TxErrors: b.txErrors.Load()}
+	return RuntimeStats{PathSuspended: b.pathSuspended.Load(), FastRetransmits: b.fastRetries.Load(), ReorderBuffered: b.rxBuffered.Load(), WireTxBytes: b.wireTxBytes.Load(), WireRxBytes: b.wireRxBytes.Load(), FastDataTx: b.fastDataTx.Load(), PullDataTx: b.pullDataTx.Load(), CompatDataTx: b.compatDataTx.Load(), IdleProbeTx: b.idleProbeTx.Load(), FastProbeTx: b.fastProbeTx.Load(), FastAckTx: b.fastAckTx.Load(), NeedPullTx: b.needPullTx.Load(), PullProbeTx: b.pullProbeTx.Load(), FastAckRx: b.fastAckRx.Load(), NeedPullRx: b.needPullRx.Load(), PullProbeRx: b.pullProbeRx.Load(), ReflectionsSuppressed: b.reflectionsSuppressed.Load(), PayloadFrameRx: b.payloadFrameRx.Load(), HMACFail: b.hmacFail.Load(), MalformedWire: b.malformedWire.Load(), UnknownSession: b.unknownSession.Load(), DataDuplicate: b.dataDuplicate.Load(), Pending: uint64(pending), Backlog: uint64(len(b.tx)), Retransmits: b.retransmits.Load(), PendingExpired: b.pendingExpired.Load(), PendingOverflow: b.pendingOverflow.Load(), FastPromotions: b.fastPromotions.Load(), FastDemotions: b.fastDemotions.Load(), FastHealthy: b.fastHealthy.Load(), PullActive: b.pullActive.Load(), CompatActive: b.compatActive.Load(), TxErrors: b.txErrors.Load()}
 }

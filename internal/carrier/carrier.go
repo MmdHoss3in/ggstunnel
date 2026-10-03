@@ -50,6 +50,7 @@ type RuntimeStats struct {
 	Retransmits     uint64 `json:"retransmits"`
 	FastPromotions  uint64 `json:"fast_promotions"`
 	FastDemotions   uint64 `json:"fast_demotions"`
+	PathSuspended bool `json:"path_suspended"`
 	FastHealthy     bool   `json:"fast_healthy"`
 	PullActive      bool   `json:"pull_active"`
 	CompatActive    bool   `json:"compat_active"`

@@ -1,0 +1,35 @@
+name: rc5 targeted recovery regression
+on:
+  push:
+    branches: [release/rc5]
+permissions:
+  contents: read
+jobs:
+  recover:
+    if: contains(github.event.head_commit.message, '[recovery-probe]')
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [steady-loss, recovery-focus]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Build and validate focused changes in cloud
+        run: |
+          gofmt -w cmd internal
+          go test -race -tags audit -short -count=1 -timeout 5m ./...
+          bash scripts/build-release.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool
+      - name: Exercise the previously failed cases
+        run: sudo env GITHUB_ACTIONS=true GGS_FOCUS=true python3 scripts/cloud_extended.py '${{ matrix.mode }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc5-focused-${{ matrix.mode }}
+          path: extended-results/

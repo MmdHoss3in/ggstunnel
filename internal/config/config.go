@@ -150,6 +150,9 @@ func (c *Config) ApplyDefaults() {
 	case "speed":
 		mtu, txq, queue, payload = 1348, 256, 8192, 1348
 	}
+	if c.Profile == "bip" && c.TUN.TxQueueLen == 0 {
+		txq = 64
+	}
 	if c.TUN.MTU == 0 {
 		c.TUN.MTU = mtu
 	}
@@ -208,7 +211,7 @@ func (c *Config) ApplyDefaults() {
 		c.Transport.BIPRTOMS = 250
 	}
 	if c.Transport.BIPMaxRetries == 0 {
-		c.Transport.BIPMaxRetries = 2
+		c.Transport.BIPMaxRetries = 8
 	}
 	if c.Transport.ICMPType == 0 {
 		c.Transport.ICMPType = 8

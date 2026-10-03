@@ -286,8 +286,10 @@ def performance(profile):
 def recovery_trial(pair, trial, scenario='blackhole3', duration=60):
     row = dict(kind='recovery', trial=trial, scenario=scenario, profile='bip', duration_sec=duration,
                rate_mbps=200, rtt_ms=80, supervisor=pair.supervised)
+    done=thread=None;samples=[]
     try:
         pair.shape(200, 80); pair.restart()
+        done,thread,samples=pair.watch()
         echo = pair.probe_server(); probe = pair.probe(duration)
         server, bulk = pair.iperf('10.77.1.2', duration, 0)
         seed = 104729 + trial; rng = random.Random(seed)
@@ -308,6 +310,7 @@ def recovery_trial(pair, trial, scenario='blackhole3', duration=60):
         else: pair.shape(loss=scenario)
         restored = time.monotonic(); row['ping_recovery_sec'] = pair.reachable(15)
         data = pair.finish_probe(probe, duration + 160)
+        (OUT/f'probe-{trial}.json').write_text(json.dumps(data))
         resumed = [t - restored for t in data['completions'] if t >= restored]
         if not resumed: raise RuntimeError('Established integrity flow did not resume after fault')
         row.update(flow_recovery_sec=round(min(resumed), 3), verified_frames=data['verified_frames'], max_gap_sec=round(data['max_gap_sec'], 3))
@@ -322,6 +325,9 @@ def recovery_trial(pair, trial, scenario='blackhole3', duration=60):
     except Exception as error:
         row.update(status='fail', error=str(error))
     finally:
+        if done:done.set();thread.join()
+        (OUT/f'recovery-{trial}-samples.json').write_text(json.dumps(samples))
+        row['end_snapshot']=pair.sample()
         if pair.supervised:
             row['supervisor_restarts'] = [run('systemctl', 'show', unit, '-p', 'NRestarts', '--value', check=False).stdout.strip() for unit in pair.units]
         record(row)
@@ -342,6 +348,13 @@ def impairments():
                                       'policing', 'peer_restart', 'blackhole10', 'blackhole30', 'blackhole60')):
             duration = 120 if scenario == 'blackhole60' else 90 if scenario == 'blackhole30' else 45
             failures += recovery_trial(pair, 1000 + i, scenario, duration)
+    return failures
+
+def recovery_focus():
+    failures=0
+    with Pair(supervised=True) as pair:
+        for i,scenario in enumerate(('3%','asymmetric','blackhole30','blackhole60')):
+            failures+=recovery_trial(pair,2000+i,scenario,120 if scenario=='blackhole60' else 90 if scenario=='blackhole30' else 45)
     return failures
 
 
@@ -405,13 +418,15 @@ def lifecycle():
 def steady_loss():
     failures=0
     with Pair() as pair:
-        for loss in ('0.2%','1%','3%'):
+        for loss in (('3%',) if os.environ.get('GGS_FOCUS')=='true' else ('0.2%','1%','3%')):
             pair.shape(200,80,loss)
             for reverse in (False,True):
                 for repeat in range(3):
                     row=dict(kind='steady_loss',loss=loss,rate_mbps=200,rtt_ms=80,reverse=reverse,repeat=repeat,sample_sec=30,warmup_sec=5)
+                    done=thread=None;samples=[]
                     try:
                         pair.restart();echo=pair.probe_server();probe=pair.probe(35)
+                        done,thread,samples=pair.watch()
                         row.update(pair.finish_iperf(*pair.iperf('10.77.1.2',30,5,reverse),65))
                         data=pair.finish_probe(probe,45);stop(echo)
                         row.update(verified_frames=data['verified_frames'],max_gap_sec=round(data['max_gap_sec'],3))
@@ -419,6 +434,7 @@ def steady_loss():
                         row['status']='pass'
                     except Exception as error:failures+=1;row.update(status='fail',error=str(error))
                     finally:
+                        if done:done.set();thread.join();(OUT/f'loss-{loss}-{reverse}-{repeat}-samples.json').write_text(json.dumps(samples))
                         for p in pair.children:stop(p)
                         pair.children=[];record(row)
     return failures
@@ -460,7 +476,7 @@ def main():
     if os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true':
         raise RuntimeError('Only root on a disposable GitHub Actions runner')
     OUT.mkdir(exist_ok=True)
-    parser = argparse.ArgumentParser(); parser.add_argument('mode', choices=('performance', 'recovery', 'impairments', 'resources', 'lifecycle','steady-loss','compatibility'))
+    parser = argparse.ArgumentParser(); parser.add_argument('mode', choices=('performance', 'recovery', 'impairments', 'resources', 'lifecycle','steady-loss','compatibility','recovery-focus'))
     parser.add_argument('--profile', default='bip'); parser.add_argument('--shard', type=int, default=0)
     args = parser.parse_args()
     (OUT / 'environment.json').write_text(json.dumps(dict(binary_sha256=run('sha256sum', BIN).stdout.split()[0],
@@ -468,7 +484,7 @@ def main():
         cpus=len(os.sched_getaffinity(0)), kernel=platform.release(), mode=args.mode,
         topology='three namespaces, netem on routed receiver path, TSO/GSO/GRO disabled', queue_policy='one full RTT BDP, minimum 256 packets')))
     failures = {'performance': lambda: performance(args.profile), 'recovery': lambda: recoveries(args.shard),
-                'impairments': impairments, 'resources': resources, 'lifecycle': lifecycle,'steady-loss':steady_loss,'compatibility':compatibility}[args.mode]()
+                'impairments': impairments, 'resources': resources, 'lifecycle': lifecycle,'steady-loss':steady_loss,'compatibility':compatibility,'recovery-focus':recovery_focus}[args.mode]()
     if failures: raise SystemExit(f'{failures} failed/target-missed cases; all recorded observations retained')
 
 
