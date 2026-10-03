@@ -38,11 +38,11 @@ def main():
     failures = [r for r in rows if r.get('status') in ('fail', 'target_miss', 'resource_limit')]
     summary['failed_or_target_missed_cases'] = len(failures)
     counts = {kind: sum(r.get('kind') == kind for r in rows) for kind in
-              ('baseline', 'performance', 'resource_cycle', 'resource_integrity', 'resource_summary', 'lifecycle')}
+              ('baseline', 'performance', 'resource_cycle', 'resource_integrity', 'resource_summary', 'lifecycle', 'steady_loss', 'compatibility')}
     counts['impairments'] = sum(r.get('kind') == 'recovery' and r.get('scenario') != 'blackhole3' for r in rows)
     summary['observation_counts'] = counts
     expected = dict(baseline=60, performance=180, resource_cycle=90, resource_integrity=2,
-                    resource_summary=4, lifecycle=30, impairments=12)
+                    resource_summary=4, lifecycle=30, impairments=12, steady_loss=18, compatibility=2)
     summary['planned_observations_complete'] = all(counts[k] == n for k, n in expected.items()) and summary['planned_60_trials_complete']
     boundary_files = list((ROOT / 'collected').rglob('boundaries.log'))
     diagnostic_files = list((ROOT / 'collected').rglob('resources.log'))
@@ -52,8 +52,9 @@ def main():
     summary['boundary_packages_passed'] = all(re.search(r'^ok\s+ggstunnel/internal/' + package + r'\s', boundary_logs, re.M) for package in expected_packages)
     summary['diagnostic_resource_test_passed'] = bool(re.search(r'^ok\s+ggstunnel/internal/carrier\s', diagnostic_logs, re.M))
     summary['go_log_failure_detected'] = bool(re.search(r'(^FAIL\b|--- FAIL:|WARNING: DATA RACE|panic:)', boundary_logs + diagnostic_logs, re.M))
-    text = '# rc4 extended short cloud validation\n\n'
-    text += 'This report describes short synthetic tests of the unchanged rc4 runtime. It does not establish multi-day uptime or Iran/foreign WAN reliability. All failures and target misses are retained.\n\n'
+    version = (ROOT / 'internal/version/VERSION').read_text().strip()
+    text = '# '+version+' extended short cloud validation\n\n'
+    text += 'This report describes short synthetic tests of the exact candidate runtime with routed receiver-path shaping and offloads disabled. It does not establish multi-day uptime or Iran/foreign WAN reliability. All failures and target misses are retained.\n\n'
     text += f"Planned observation counts complete: {summary['planned_observations_complete']}; counts: {json.dumps(counts)}. Missing observations do not count as passes.\n\n"
     text += f"Go boundary packages passed: {summary['boundary_packages_passed']}; diagnostic resource test passed: {summary['diagnostic_resource_test_passed']}; Go log failure detected: {summary['go_log_failure_detected']}. Logs must be inspected alongside Actions job conclusions.\n\n"
     text += f"Recovery trials: {passed}/{len(trials)} passed; 60 planned runs complete: {summary['planned_60_trials_complete']}.\n\n"
@@ -80,9 +81,14 @@ def main():
         if row.get('kind') in ('resource_summary', 'resource_integrity'):
             text += '- ' + json.dumps(row) + '\n'
     text += '\nRSS/FD measurements are short screening observations, not a proof of absence of leaks. In-process Go heap/goroutine tests, if present, are separate from measurements of the exact release executable.\n'
+    text += '\n## Steady impaired transfers and compatibility\n\n'
+    for row in rows:
+        if row.get('kind') in ('steady_loss','compatibility'): text += '- ' + json.dumps(row) + '\n'
     (ROOT / 'extended-report.md').write_text(text)
     (ROOT / 'extended-summary.json').write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
+    if failures or not summary['planned_observations_complete'] or not summary['boundary_packages_passed'] or not summary['diagnostic_resource_test_passed'] or summary['go_log_failure_detected']:
+        raise SystemExit('Extended release gate failed; inspect retained observations')
 
 
 if __name__ == '__main__': main()

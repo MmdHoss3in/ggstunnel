@@ -26,11 +26,11 @@ type packetDevice interface {
 
 type Engine struct {
 	transportMu sync.RWMutex
-	cfg     *config.Config
-	tun     packetDevice
-	carrier carrier.Carrier
-	codec   *frame.Codec
-	reasm   *frame.Reassembler
+	cfg         *config.Config
+	tun         packetDevice
+	carrier     carrier.Carrier
+	codec       *frame.Codec
+	reasm       *frame.Reassembler
 
 	txPackets atomic.Uint64
 	rxPackets atomic.Uint64
@@ -72,16 +72,23 @@ func New(c *config.Config) (*Engine, error) {
 func (e *Engine) Run(ctx context.Context) error {
 	for {
 		err := e.runOnce(ctx)
-		if ctx.Err() != nil { return nil }
-		if e.cfg.Profile != "bip" || (!errors.Is(err, carrier.ErrBIPDeliveryTimeout) && !errors.Is(err, session.ErrRotationLimit)) { return err }
+		if ctx.Err() != nil {
+			return nil
+		}
+		if e.cfg.Profile != "bip" || (!errors.Is(err, carrier.ErrBIPDeliveryTimeout) && !errors.Is(err, session.ErrRotationLimit)) {
+			return err
+		}
 		e.recoveries.Add(1)
 		log.Printf("recovering BIP with fresh authenticated identity: %v", err)
 		select {
-		case <-ctx.Done(): return nil
+		case <-ctx.Done():
+			return nil
 		case <-time.After(time.Second):
 		}
 		fresh, nextErr := New(e.cfg)
-		if nextErr != nil { return nextErr }
+		if nextErr != nil {
+			return nextErr
+		}
 		// runOnce joins every worker before returning. New codecs generate fresh
 		// session IDs and keys; counters are never reset under an existing key.
 		e.transportMu.Lock()

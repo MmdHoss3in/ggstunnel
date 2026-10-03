@@ -1,7 +1,6 @@
-name: rc4 extended short cloud validation
+name: Extended short cloud validation
 on:
-  push:
-    branches: [testing/rc4-short-validation]
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,6 +24,8 @@ jobs:
           - { mode: resources, profile: bip, shard: 0, runner: ubuntu-24.04 }
           - { mode: resources, profile: bip, shard: 0, runner: ubuntu-24.04-arm }
           - { mode: impairments, profile: bip, shard: 0, runner: ubuntu-24.04 }
+          - { mode: steady-loss, profile: bip, shard: 0, runner: ubuntu-24.04 }
+          - { mode: compatibility, profile: bip, shard: 0, runner: ubuntu-24.04 }
           - { mode: lifecycle, profile: bip, shard: 0, runner: ubuntu-24.04 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -32,19 +33,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
-          ref: v0.3.0-rc4
+          ref: ${{ github.sha }}
           path: release-source
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
           cache: false
-      - name: Build exact tagged runtime and check harness
+      - name: Build exact candidate runtime and check harness
         run: |
-          test "$(git -C release-source rev-parse HEAD)" = ce87571f35ff21598fe9e8b1ae1b35efa1353c1b
+          test "$(git -C release-source rev-parse HEAD)" = "$GITHUB_SHA"
           bash release-source/scripts/build-release.sh
           python3 -m py_compile scripts/cloud_extended.py scripts/cloud_probe.py scripts/cloud_summary.py
           sudo apt-get update -qq
-          sudo apt-get install -y iperf3
+          sudo apt-get install -y iperf3 ethtool
       - name: Run prescribed experiment
         env:
           GITHUB_ACTIONS: 'true'
@@ -62,7 +63,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
-          ref: v0.3.0-rc4
+          ref: ${{ github.sha }}
           path: release-source
       - uses: actions/setup-go@v5
         with:
@@ -73,7 +74,7 @@ jobs:
         working-directory: release-source
         run: |
           mkdir -p ../boundary-results
-          go test -race -tags audit ./internal/carrier ./internal/frame ./internal/session ./internal/engine -run 'Wrap|Boundary|Expiry|Budget|Rotation|WorkerShutdown' -count=50 -timeout 6m -v | tee ../boundary-results/boundaries.log
+          go test -race -tags audit ./internal/carrier ./internal/frame ./internal/session ./internal/engine -run 'Wrap|Boundary|Expiry|Budget|Rotation|WorkerShutdown|WideSACK|PersistentRetransmission|PathReturn|TCPBatch' -count=50 -timeout 6m -v | tee ../boundary-results/boundaries.log
       - name: Diagnostic live heap and goroutine cycles
         shell: bash
         run: |
@@ -100,6 +101,8 @@ jobs:
         run: |
           python3 scripts/cloud_summary.py
           cat extended-report.md >> "$GITHUB_STEP_SUMMARY"
+          test '${{ needs.experiments.result }}' = success
+          test '${{ needs.boundaries.result }}' = success
       - uses: actions/upload-artifact@v4
         with:
           name: extended-final-report

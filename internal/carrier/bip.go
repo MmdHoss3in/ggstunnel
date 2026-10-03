@@ -24,20 +24,20 @@ import (
 )
 
 const (
-	bipMagic                = "BIP5"
-	bipICMPHeaderLen        = 72
-	bipKindFastProbe   byte = 1
-	bipKindFastAck     byte = 2
-	bipKindNeedPull    byte = 3
-	bipKindPullProbe   byte = 4
-	bipKindData        byte = 5
-	bipKindAck         byte = 6
-	bipKindHello       byte = 7
-	bipKindChallenge   byte = 8
-	bipKindProof       byte = 9
-	bipKindReady       byte = 10
-	bipFlagMore        byte = 1
-	bipFlagPulled      byte = 2
+	bipMagic              = "BIP5"
+	bipICMPHeaderLen      = 72
+	bipKindFastProbe byte = 1
+	bipKindFastAck   byte = 2
+	bipKindNeedPull  byte = 3
+	bipKindPullProbe byte = 4
+	bipKindData      byte = 5
+	bipKindAck       byte = 6
+	bipKindHello     byte = 7
+	bipKindChallenge byte = 8
+	bipKindProof     byte = 9
+	bipKindReady     byte = 10
+	bipFlagMore      byte = 1
+	bipFlagPulled    byte = 2
 	// MORE is ignored on legacy PROOF packets. Its authenticated use there
 	// advertises wide SACK without introducing a flag old parsers reject.
 	bipFlagWideSACK    byte = bipFlagMore
@@ -84,7 +84,10 @@ type wirePacket struct {
 	payload                []byte
 }
 
-type ackDelivery struct { seq uint32; sent time.Time }
+type ackDelivery struct {
+	seq  uint32
+	sent time.Time
+}
 
 // The actor owns all handshake, path and delivery state.
 // PacketIO is an injectable outer-packet I/O backend. Receive returns an ICMP
@@ -690,7 +693,9 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.ackMu.Unlock()
 	b.active = id
 	b.peerSpan = bipLegacySpan
-	if b.tuner != nil { b.tuner.maxWindow = min(b.cfg.Performance.QueueSize, bipLegacySpan) }
+	if b.tuner != nil {
+		b.tuner.maxWindow = min(b.cfg.Performance.QueueSize, bipLegacySpan)
+	}
 	b.sessionKey = key
 	b.dataSeq = 0
 	b.lossFlightSet = false
@@ -804,7 +809,9 @@ func (b *BIP) handle(body []byte, now time.Time) {
 			proof := session.Proof(b.master, c)
 			payload := append(marshalChallenge(c), proof[:]...)
 			capability := byte(0)
-			if b.cfg.Performance.QueueSize >= bipWideSpan { capability = bipFlagWideSACK }
+			if b.cfg.Performance.QueueSize >= bipWideSpan {
+				capability = bipFlagWideSACK
+			}
 			_ = b.send(responseType(p), p.id, p.tuple, bipKindProof, capability, 0, payload, p.sender)
 			if b.active != p.sender {
 				b.issueChallenge(p, now)
@@ -833,7 +840,10 @@ func (b *BIP) handle(body []byte, now time.Time) {
 			// and a verified proof. Legacy peers ignore this flag and advertise 0.
 			if p.flags&bipFlagWideSACK != 0 {
 				b.peerSpan = bipWideSpan
-				if b.tuner != nil { b.tuner.resizeWindow(b.window()); b.publishTuner(now) }
+				if b.tuner != nil {
+					b.tuner.resizeWindow(b.window())
+					b.publishTuner(now)
+				}
 			}
 			_ = b.send(responseType(p), p.id, p.tuple, bipKindReady, 0, 0, nil, p.sender)
 		case bipKindReady: // READY never authorizes a session reset.
@@ -860,7 +870,9 @@ func (b *BIP) handle(body []byte, now time.Time) {
 		_ = b.send(responseType(p), p.id, p.tuple, bipKindFastAck, 0, p.token, nil, b.active)
 	case bipKindFastAck:
 		if p.token != 0 && p.token == b.fastToken && now.Before(b.fastDeadline) {
-			if !now.Before(b.fastUntil) { b.expeditePathRetries(now) }
+			if !now.Before(b.fastUntil) {
+				b.expeditePathRetries(now)
+			}
 			b.fastUntil = now.Add(time.Duration(b.cfg.Transport.BIPFastTTLMS) * time.Millisecond)
 			b.fastToken = 0
 			b.fastAckRx.Add(1)
@@ -903,7 +915,9 @@ func (b *BIP) window() int {
 	return min(n, b.ackSpan())
 }
 func (b *BIP) ackSpan() int {
-	if b.peerSpan == bipWideSpan { return bipWideSpan }
+	if b.peerSpan == bipWideSpan {
+		return bipWideSpan
+	}
 	return bipLegacySpan
 }
 func (b *BIP) deliverOne(typ byte, id, tuple uint16, mode byte, now time.Time) {
@@ -1002,7 +1016,9 @@ func (b *BIP) run(ctx context.Context) {
 			b.drainRX()
 			// Keep reporting a retained hole even if its retransmission was lost
 			// and no new data can cross the cumulative-ACK horizon.
-			if len(b.rxHold) > 0 && b.ackDue.IsZero() && now.Sub(b.lastAck) >= 100*time.Millisecond { b.flushAck(now) }
+			if len(b.rxHold) > 0 && b.ackDue.IsZero() && now.Sub(b.lastAck) >= 100*time.Millisecond {
+				b.flushAck(now)
+			}
 			if fast != b.fastHealthy.Swap(fast) {
 				if fast {
 					b.fastPromotions.Add(1)
@@ -1251,7 +1267,9 @@ func (b *BIP) decode(body []byte) (wirePacket, error) {
 	p.sack = binary.BigEndian.Uint64(body[48:56])
 	p.payload = body[72:]
 	span := bipLegacySpan
-	if b.peerSpan == bipWideSpan { span = bipWideSpan }
+	if b.peerSpan == bipWideSpan {
+		span = bipWideSpan
+	}
 	if p.kind == bipKindAck && (len(p.payload) > (span/64-1)*8 || len(p.payload)%8 != 0) {
 		return p, errors.New("invalid extended ACK")
 	}

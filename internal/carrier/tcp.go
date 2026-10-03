@@ -230,8 +230,10 @@ func (t *TCP) writeLoop(ctx context.Context, c net.Conn) error {
 		batch:
 			for count := 1; count < 32 && len(buf) < 64<<10; count++ {
 				select {
-				case next := <-t.tx: appendFrame(next)
-				default: break batch
+				case next := <-t.tx:
+					appendFrame(next)
+				default:
+					break batch
 				}
 			}
 			c.SetWriteDeadline(time.Now().Add(t.cfg.IdleTimeout()))

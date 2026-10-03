@@ -1,13 +1,15 @@
 name: Linux validation and release
 on:
   push:
-    branches: [main]
+    branches: [main, release/rc5]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  extended-validation:
+    uses: ./.github/workflows/extended.yml
   validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -45,17 +47,17 @@ jobs:
       - name: Real TUN throughput under delay and loss
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y iperf3
+          sudo apt-get install -y iperf3 ethtool
           mkdir -p artifacts
-          sudo env GGS_RESULTS="$PWD/artifacts/network-results.jsonl" GGS_RECOVERY_RESULTS="$PWD/artifacts/recovery-results.jsonl" python3 scripts/test_netns.py
+          sudo env GITHUB_ACTIONS=true GGS_RESULTS="$PWD/artifacts/network-results.jsonl" GGS_RECOVERY_RESULTS="$PWD/artifacts/recovery-results.jsonl" python3 scripts/test_netns.py
           for profile in tcp udp icmp gre; do
-            sudo env GGS_TEST_PROFILE="$profile" GGS_RESULTS="$PWD/artifacts/network-results.jsonl" python3 scripts/test_netns.py
+            sudo env GITHUB_ACTIONS=true GGS_TEST_PROFILE="$profile" GGS_RESULTS="$PWD/artifacts/network-results.jsonl" python3 scripts/test_netns.py
           done
       - name: Package verified source and binaries
         run: |
           bash scripts/build-release.sh
           mkdir -p artifacts
-          tar --exclude='./.git' --exclude='./.github' --exclude='./artifacts' --exclude='__pycache__' --transform='s,^\.,ggstunnel,' -czf artifacts/ggstunnel-linux.tar.gz .
+          tar --exclude='./.git' --exclude='./.github' --exclude='./artifacts' --exclude='./extended-results' --exclude='__pycache__' --transform='s,^\.,ggstunnel,' -czf artifacts/ggstunnel-linux.tar.gz .
           cd artifacts
           sha256sum ggstunnel-linux.tar.gz > SHA256SUMS
       - uses: actions/upload-artifact@v4
@@ -84,7 +86,7 @@ jobs:
           printf '0\n' | sudo /usr/local/bin/ggstunnel
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [validate, platform-smoke]
+    needs: [validate, platform-smoke, extended-validation]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -94,6 +96,10 @@ jobs:
         with:
           name: ggstunnel-linux
           path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: extended-final-report
+          path: artifacts
       - name: Publish tested version
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,4 +108,4 @@ jobs:
           python3 scripts/render_release_notes.py
           flags=(--latest)
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl artifacts/recovery-results.jsonl --verify-tag "${flags[@]}" --title "ggstunnel $GITHUB_REF_NAME" --notes-file artifacts/release-notes.md
+          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl artifacts/recovery-results.jsonl artifacts/extended-summary.json artifacts/extended-report.md --verify-tag "${flags[@]}" --title "ggstunnel $GITHUB_REF_NAME" --notes-file artifacts/release-notes.md

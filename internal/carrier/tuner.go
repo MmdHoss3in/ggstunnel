@@ -34,7 +34,9 @@ type TunerSnapshot struct {
 }
 
 func (t *bipTuner) resizeWindow(limit int) {
-	if t.threshold >= float64(t.maxWindow) { t.threshold = float64(limit) }
+	if t.threshold >= float64(t.maxWindow) {
+		t.threshold = float64(limit)
+	}
 	t.maxWindow = limit
 	t.cwnd = math.Min(t.cwnd, float64(limit))
 	t.credit = math.Min(t.credit, float64(t.burst()))

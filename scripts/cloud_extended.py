@@ -1,5 +1,6 @@
-"""Extended short validation of the exact rc4 binary on disposable Linux CI."""
+"""Extended short validation of the exact candidate binary on disposable Linux CI."""
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -10,6 +11,7 @@ import re
 import select
 import statistics
 import subprocess
+import tarfile
 import tempfile
 import threading
 import time
@@ -59,8 +61,11 @@ class Pair:
         self.router = 'gx-r'; self.router_devs = ['gx-ra', 'gx-rb']
         self.outer = ['192.0.2.1', '198.51.100.1']
         self.p = [None, None]; self.units = ['ggs-cloud-a', 'ggs-cloud-b']
+        self.executables = [BIN, BIN]
         self.children = []; self.created = []; self.logs = []
         self.tmp = tempfile.TemporaryDirectory(); self.path = Path(self.tmp.name)
+        self.stats_paths = [self.path / f'stats-{i}.json' for i in range(2)]
+        self.installed_paths = []
         self.rate = 200; self.rtt = 80; self.monitor_data = []
 
     def __enter__(self):
@@ -92,6 +97,21 @@ class Pair:
                 (self.path / f'{i}.json').write_text(json.dumps(cfg)); (self.path / f'{i}.json').chmod(0o600)
                 self.logs.append((OUT / f'tunnel-{i}.log').open('a'))
             self.shape()
+            if self.supervised:
+                import manage as manager
+                manager.install(SOURCE)
+                self.units = ['ggstunnel@ggs166.service', 'ggstunnel@ggs167.service']
+                for i in range(2):
+                    cfg=json.loads((self.path/f'{i}.json').read_text());cfg['tun']['name']=f'ggs{166+i}'
+                    config=manager.confpath(cfg['tun']['name'])
+                    drop=manager.UNITS/(self.units[i]+'.d')/'cloud.conf'
+                    if config.exists() or drop.exists():raise RuntimeError('Refusing to replace existing integration configuration')
+                    self.stats_paths[i]=manager.RUN/(cfg['tun']['name']+'.json')
+                    cfg['telemetry']['stats_file']=str(self.stats_paths[i])
+                    manager.atomic(config,json.dumps(cfg));self.installed_paths.append(config)
+                    manager.atomic(drop,'[Service]\nNetworkNamespacePath=/run/netns/'+self.names[i]+'\nExecStart=\nExecStart='+str(manager.binary())+' -c '+str(config)+' -stats-file '+str(self.stats_paths[i])+'\n',0o644)
+                    self.installed_paths.append(drop)
+                run('systemctl','daemon-reload')
             return self
         except BaseException:
             self.__exit__(None, None, None); raise
@@ -115,11 +135,9 @@ class Pair:
 
     def start_peer(self, i):
         if self.supervised:
-            run('systemd-run', '--quiet', '--unit=' + self.units[i], '--property=Restart=on-failure',
-                '--property=RestartSec=3', '/usr/bin/ip', 'netns', 'exec', self.names[i], BIN,
-                '-c', self.path / f'{i}.json')
+            run('systemctl','start',self.units[i])
         else:
-            self.p[i] = subprocess.Popen(['ip', 'netns', 'exec', self.names[i], str(BIN),
+            self.p[i] = subprocess.Popen(['ip', 'netns', 'exec', self.names[i], str(self.executables[i]),
                                           '-c', str(self.path / f'{i}.json')], stdout=self.logs[i], stderr=self.logs[i])
 
     def stop_peer(self, i):
@@ -160,6 +178,8 @@ class Pair:
         stdout, stderr = client.communicate(timeout=limit)
         if client.returncode: raise RuntimeError('iperf failure: ' + stderr + stdout[:200])
         data = json.loads(stdout)
+        # Retain interval evidence, including warm-up omission markers.
+        (OUT / ('iperf-'+str(time.time_ns())+'.json')).write_text(stdout)
         if 'error' in data: raise RuntimeError(data['error'])
         result = data['end'].get('sum_received', data['end'].get('sum', {}))
         if 'bits_per_second' not in result: raise RuntimeError('Missing iperf receiver result')
@@ -202,7 +222,7 @@ class Pair:
                     info['threads'] = int(re.search(r'Threads:\s+(\d+)', status)[1])
                     stat = (proc / 'stat').read_text().rsplit(')', 1)[1].split()
                     info['cpu_sec'] = (int(stat[11]) + int(stat[12])) / os.sysconf('SC_CLK_TCK')
-                    telemetry = self.path / f'stats-{i}.json'
+                    telemetry = self.stats_paths[i]
                     if telemetry.exists(): info['telemetry'] = json.loads(telemetry.read_text())
                 except (OSError, ValueError, TypeError, json.JSONDecodeError): info['sample_race'] = True
             peers.append(info)
@@ -220,6 +240,9 @@ class Pair:
         for p in self.children: stop(p)
         for i in range(2): self.stop_peer(i)
         for f in self.logs: f.close()
+        for path in self.installed_paths:
+            path.unlink(missing_ok=True)
+        if self.installed_paths: run('systemctl','daemon-reload',check=False)
         for name in reversed(self.created): run('ip', 'netns', 'del', name, check=False)
         self.tmp.cleanup()
 
@@ -246,7 +269,7 @@ def performance(profile):
                             times = [float(x) for x in re.findall(r'time[=<]([0-9.]+)', ping_stdout)]
                             row.update(ping_p95_ms=percentile(times, .95), ping_p99_ms=percentile(times, .99),
                                        baseline_ratio=round(row['received_mbps'] / base['received_mbps'], 3))
-                            target = 100 if profile == 'bip' and rate == 200 and rtt == 80 else 1
+                            target = 100 if profile == 'bip' else 30
                             row['target_mbps'] = target; row['status'] = 'pass' if row['received_mbps'] >= target else 'target_miss'
                             if row['status'] != 'pass': failures += 1
                         except Exception as error:
@@ -379,11 +402,65 @@ def lifecycle():
     return failures
 
 
+def steady_loss():
+    failures=0
+    with Pair() as pair:
+        for loss in ('0.2%','1%','3%'):
+            pair.shape(200,80,loss)
+            for reverse in (False,True):
+                for repeat in range(3):
+                    row=dict(kind='steady_loss',loss=loss,rate_mbps=200,rtt_ms=80,reverse=reverse,repeat=repeat,sample_sec=30,warmup_sec=5)
+                    try:
+                        pair.restart();echo=pair.probe_server();probe=pair.probe(35)
+                        row.update(pair.finish_iperf(*pair.iperf('10.77.1.2',30,5,reverse),65))
+                        data=pair.finish_probe(probe,45);stop(echo)
+                        row.update(verified_frames=data['verified_frames'],max_gap_sec=round(data['max_gap_sec'],3))
+                        if row['received_mbps']<1 or data['verified_frames']<10 or data['max_gap_sec']>15:raise RuntimeError('Steady loss connectivity/progress floor failed')
+                        row['status']='pass'
+                    except Exception as error:failures+=1;row.update(status='fail',error=str(error))
+                    finally:
+                        for p in pair.children:stop(p)
+                        pair.children=[];record(row)
+    return failures
+
+
+def compatibility():
+    failures=0
+    with Pair() as pair:
+        base='https://github.com/MmdHoss3in/ggstunnel/releases/download/v0.3.0-rc4/'
+        archive=pair.path/'legacy.tar.gz';sums=pair.path/'legacy.sums'
+        for filename,dest in [('ggstunnel-linux.tar.gz',archive),('SHA256SUMS',sums)]:
+            run('curl','--fail','--location','--retry','3','--proto','=https',base+filename,'-o',dest,timeout=120)
+        expected=[line.split()[0] for line in sums.read_text().splitlines() if line.split()[-1].lstrip('*')=='ggstunnel-linux.tar.gz']
+        if len(expected)!=1 or hashlib.sha256(archive.read_bytes()).hexdigest()!=expected[0]:raise RuntimeError('Legacy release checksum mismatch')
+        with tarfile.open(archive) as t:t.extractall(pair.path/'legacy',filter='data')
+        old=pair.path/'legacy/ggstunnel/dist'/BIN.name
+        version=run(old,'-version').stdout.strip()
+        if not version.endswith('0.3.0-rc4'):raise RuntimeError('Wrong legacy executable')
+        for legacy_peer in (0,1):
+            pair.executables=[BIN,BIN];pair.executables[legacy_peer]=old
+            row=dict(kind='compatibility',legacy_peer=legacy_peer,legacy_version=version)
+            try:
+                pair.shape(100,80);pair.restart();echo=pair.probe_server();probe=pair.probe(10)
+                row.update(pair.finish_iperf(*pair.iperf('10.77.1.2',8,2,bool(legacy_peer)),40))
+                data=pair.finish_probe(probe,20);stop(echo)
+                row['verified_frames']=data['verified_frames']
+                time.sleep(1);snapshot=pair.sample()['peers'][1-legacy_peer].get('telemetry',{})
+                row['new_peer_telemetry']=snapshot
+                if row['received_mbps']<30 or data['verified_frames']<10:raise RuntimeError('Mixed-version transfer failed')
+                row['status']='pass'
+            except Exception as error:failures+=1;row.update(status='fail',error=str(error))
+            finally:
+                for p in pair.children:stop(p)
+                pair.children=[];record(row)
+    return failures
+
+
 def main():
     if os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true':
         raise RuntimeError('Only root on a disposable GitHub Actions runner')
     OUT.mkdir(exist_ok=True)
-    parser = argparse.ArgumentParser(); parser.add_argument('mode', choices=('performance', 'recovery', 'impairments', 'resources', 'lifecycle'))
+    parser = argparse.ArgumentParser(); parser.add_argument('mode', choices=('performance', 'recovery', 'impairments', 'resources', 'lifecycle','steady-loss','compatibility'))
     parser.add_argument('--profile', default='bip'); parser.add_argument('--shard', type=int, default=0)
     args = parser.parse_args()
     (OUT / 'environment.json').write_text(json.dumps(dict(binary_sha256=run('sha256sum', BIN).stdout.split()[0],
@@ -391,7 +468,7 @@ def main():
         cpus=len(os.sched_getaffinity(0)), kernel=platform.release(), mode=args.mode,
         topology='three namespaces, netem on routed receiver path, TSO/GSO/GRO disabled', queue_policy='one full RTT BDP, minimum 256 packets')))
     failures = {'performance': lambda: performance(args.profile), 'recovery': lambda: recoveries(args.shard),
-                'impairments': impairments, 'resources': resources, 'lifecycle': lifecycle}[args.mode]()
+                'impairments': impairments, 'resources': resources, 'lifecycle': lifecycle,'steady-loss':steady_loss,'compatibility':compatibility}[args.mode]()
     if failures: raise SystemExit(f'{failures} failed/target-missed cases; all recorded observations retained')
 
 
