@@ -44,7 +44,7 @@
   },
   "performance": {
     "profile": "stable",
-    "queue_size": 4096,
+    "queue_size": 8192,
     "max_frame_payload": 1280
   },
   "log_level": "info",

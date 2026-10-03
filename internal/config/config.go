@@ -143,12 +143,12 @@ func (c *Config) ApplyDefaults() {
 	if c.TUN.Prefix == 0 {
 		c.TUN.Prefix = 30
 	}
-	mtu, txq, queue, payload := 1280, 256, 4096, 1280
+	mtu, txq, queue, payload := 1280, 256, 8192, 1280
 	switch strings.ToLower(c.Performance.Profile) {
 	case "gaming", "low_latency":
 		mtu, txq, queue, payload = 1240, 256, 1024, 1240
 	case "speed":
-		mtu, txq, queue, payload = 1348, 4096, 8192, 1348
+		mtu, txq, queue, payload = 1348, 256, 8192, 1348
 	}
 	if c.TUN.MTU == 0 {
 		c.TUN.MTU = mtu

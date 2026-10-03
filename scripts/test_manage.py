@@ -78,6 +78,7 @@ class ManagerTests(unittest.TestCase):
   source=self.root/'package';(source/'dist').mkdir(parents=True)
   shutil.copy2(EXE,source/'dist'/EXE.name)
   (source/'scripts').mkdir();(source/'scripts/manage.py').write_text('# manager test fixture')
+  (source/'internal/version').mkdir(parents=True);(source/'internal/version/VERSION').write_text(m.VERSION)
   def manifest():
    exe=source/'dist'/EXE.name
    (source/'dist/SHA256SUMS').write_text(hashlib.sha256(exe.read_bytes()).hexdigest()+'  '+exe.name+'\n')

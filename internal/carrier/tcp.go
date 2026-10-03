@@ -27,7 +27,7 @@ type TCP struct {
 }
 
 func NewTCP(c *config.Config) *TCP {
-	return &TCP{cfg: c, rx: make(chan []byte, c.Performance.QueueSize), tx: make(chan []byte, c.Performance.QueueSize), closeCh: make(chan struct{})}
+	return &TCP{cfg: c, rx: make(chan []byte, c.Performance.QueueSize), tx: make(chan []byte, min(c.Performance.QueueSize, 256)), closeCh: make(chan struct{})}
 }
 func (t *TCP) Name() string        { return "tcp" }
 func (t *TCP) Recv() <-chan []byte { return t.rx }
@@ -215,14 +215,26 @@ func writeFull(w io.Writer, b []byte) error {
 	return nil
 }
 func (t *TCP) writeLoop(ctx context.Context, c net.Conn) error {
+	buf := make([]byte, 0, 64<<10)
+	appendFrame := func(b []byte) {
+		buf = binary.BigEndian.AppendUint32(buf, uint32(len(b)))
+		buf = append(buf, b...)
+	}
 	for {
 		select {
 		case b := <-t.tx:
+			buf = buf[:0]
+			appendFrame(b)
+			// Batch only frames already queued. Never wait on a batching timer:
+			// an isolated ACK/control frame is written immediately.
+		batch:
+			for count := 1; count < 32 && len(buf) < 64<<10; count++ {
+				select {
+				case next := <-t.tx: appendFrame(next)
+				default: break batch
+				}
+			}
 			c.SetWriteDeadline(time.Now().Add(t.cfg.IdleTimeout()))
-			// One contiguous write avoids two syscalls per packet.
-			buf := make([]byte, 4+len(b))
-			binary.BigEndian.PutUint32(buf, uint32(len(b)))
-			copy(buf[4:], b)
 			if err := writeFull(c, buf); err != nil {
 				return err
 			}

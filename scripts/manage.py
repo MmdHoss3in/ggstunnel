@@ -61,8 +61,22 @@ def arch():
     if not a: raise ValueError('Only Linux amd64/arm64 supported')
     return a
 
-def configs():
-    return {p.stem: json.loads(p.read_text()) for p in sorted((ROOT / 'tunnels').glob('ggs*.json'))}
+def configs(ignore=None, strict=True):
+    result = {}
+    for p in sorted((ROOT / 'tunnels').glob('ggs*.json')):
+        if p.stem == ignore: continue
+        try:
+            name_ok(p.stem)
+            c = json.loads(p.read_text())
+            if not isinstance(c, dict) or c.get('tun', {}).get('name') != p.stem:
+                raise ValueError('Configuration name does not match its file')
+            for key in ('role', 'profile', 'real', 'tun', 'performance', 'transport'):
+                if key not in c: raise ValueError('Missing ' + key)
+            result[p.stem] = c
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            if strict: raise ValueError('Invalid configuration ' + p.name + ': ' + str(error)) from error
+            print(p.stem, 'INVALID configuration; edit/restore or delete this tunnel')
+    return result
 
 def ipv4(s):
     a = ipaddress.IPv4Address(s)
@@ -95,7 +109,7 @@ def make_config(index, profile, server, peer, port, psk, role, local=None):
         tun=dict(name=f'ggs{index:02d}', local_addr=b if client else a, remote_addr=a if client else b,
                  prefix=30, mtu=1280, tx_queue_len=256, routes=[]),
         transport=dict(l4_port=port, heartbeat_sec=2, idle_timeout_sec=30, sock_buf=4 << 20, bip_pull_burst=128, bip_max_retries=8),
-        performance=dict(profile='stable', queue_size=4096, max_frame_payload=1280),
+        performance=dict(profile='stable', queue_size=8192, max_frame_payload=1280),
         tuner=dict(mode='adaptive' if profile == 'bip' else 'manual', max_pps=10000, max_burst=128, unlimited_rate=True),
         telemetry=dict(interval_sec=2), forwards=[])
 
@@ -131,24 +145,32 @@ def validate(c, exe=None):
         run([exe or binary(), '-c', path, '-check'])
     finally: os.unlink(path)
 
+def listeners_overlap(a, b):
+    host_a, port_a = a.rsplit(':', 1); host_b, port_b = b.rsplit(':', 1)
+    if int(port_a) != int(port_b): return False
+    ip_a = ipaddress.ip_address(host_a.strip('[]')); ip_b = ipaddress.ip_address(host_b.strip('[]'))
+    return ip_a == ip_b or ip_a.is_unspecified or ip_b.is_unspecified
+
 def conflict(c, old_name=None):
-    for name, other in configs().items():
+    others = configs(ignore=old_name)
+    for name, other in others.items():
         if name == old_name: continue
         if c['tun']['name'] == name or c['tun']['local_addr'] == other['tun']['local_addr']:
             raise ValueError('Tunnel ID/address already allocated')
         if c['profile'] == other['profile']:
-            if c['profile'] in ('tcp', 'udp') and c['real']['listen_addr'] == other['real']['listen_addr']:
+            if c['profile'] in ('tcp', 'udp') and listeners_overlap(c['real']['listen_addr'], other['real']['listen_addr']):
                 raise ValueError('Transport port already allocated')
             if c['profile'] in ('bip','icmp','gre') and c['real']['peer_ip'] == other['real']['peer_ip']:
                 raise ValueError('One raw tunnel per transport and public peer IP')
-    binds = set()
-    for name, other in configs().items():
-        if name != old_name:
-            binds.update((r['protocol'], r['listen']) for r in other.get('forwards', []))
-    for r in c.get('forwards', []):
-        key = (r['protocol'], r['listen'])
-        if key in binds: raise ValueError('Duplicate forward listener')
-        binds.add(key)
+    binds = []
+    for other in [*others.values(), c]:
+        entries = [(r['protocol'], r['listen']) for r in other.get('forwards', [])]
+        if other['profile'] == 'udp' or (other['profile'] == 'tcp' and other['role'] == 'server'):
+            entries.append((other['profile'], other['real']['listen_addr']))
+        for proto, address in entries:
+            if any(proto == p and listeners_overlap(address, bind) for p, bind in binds):
+                raise ValueError('Overlapping transport/forward listener: ' + address)
+            binds.append((proto, address))
 
 def wait_service(name):
     time.sleep(1)
@@ -210,11 +232,12 @@ def select_name():
     status(); return name_ok(ask('Tunnel name, e.g. ggs01'))
 
 def status():
-    for name,c in configs().items():
+    entries = configs(strict=False)
+    for name,c in entries.items():
         p = run(['systemctl','is-enabled',unit(name)],check=False)
         print(name, c['role'], c['profile'], c['tun']['local_addr'], '<->', c['tun']['remote_addr'],
               'RUNNING' if active(name) else 'STOPPED', p.stdout.strip())
-    if not configs(): print('No configured tunnels')
+    if not entries: print('No valid configured tunnels')
 
 def action(verb, name):
     names = list(configs()) if name == 'all' else [name_ok(name)]
@@ -242,13 +265,13 @@ def delete(name):
     print('Deleted tunnel; private config backup retained.')
 
 def edit(name):
-    c = configs()[name]
     print('1) Edit full JSON  2) Add TCP/UDP forward  3) Remove forward  4) Restore previous config')
     choice = ask('Choice')
+    c = configs().get(name) if choice in ('2', '3') else None
     if choice == '1':
         fd,p = tempfile.mkstemp(dir=ROOT,suffix='.json')
         try:
-            with os.fdopen(fd,'w') as f: json.dump(c,f,indent=2)
+            with os.fdopen(fd,'w') as f: f.write(confpath(name).read_text())
             subprocess.run(['nano',p],check=True)
             c = json.loads(Path(p).read_text())
             if c['tun']['name'] != name: raise ValueError('Tunnel name cannot be changed')
@@ -269,13 +292,17 @@ def edit(name):
         files=sorted((ROOT/'backups').glob(name+'-*.json'),key=lambda p:p.stat().st_mtime,reverse=True)
         for i,p in enumerate(files[:10],1): print(i,p.name)
         p=files[integer(ask('Backup number'),1,min(10,len(files)))-1]
-        save_config(json.loads(p.read_text()),True)
+        restored = json.loads(p.read_text())
+        if restored.get('tun', {}).get('name') != name: raise ValueError('Backup belongs to another tunnel')
+        save_config(restored,True)
+    else: raise ValueError('Unknown edit option')
+    c = configs()[name]
     if c['role']=='server': print('If shared settings changed, replace the client config too using this code:\n'+encode_join(c))
 
 def diagnose(name):
     c=configs()[name];stamp=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     dest=ROOT/'reports';dest.mkdir(mode=0o700,exist_ok=True)
-    path=dest/(name+'-'+stamp+'.txt')
+    path=dest/(name+'-'+stamp+'-'+str(time.time_ns())+'.txt')
     chunks=[f'ggstunnel {VERSION}; transport={c["profile"]}; role={c["role"]}\n']
     for cmd in [[binary(),'-version'],['uname','-a'],['cat','/etc/os-release'],['free','-m'],['systemctl','status','--no-pager',unit(name)],
                 ['ip','-s','link','show',c['tun']['name']],['ip','route','get',c['tun']['remote_addr']],
@@ -291,7 +318,7 @@ def capacity(name, mode, rates=(5,20,50,80,100), duration=30):
     if mode=='listen':
         stamp=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         dest=ROOT/'reports';dest.mkdir(mode=0o700,exist_ok=True)
-        trace=dest/(name+'-listener-'+stamp+'.jsonl');stop=threading.Event()
+        trace=dest/(name+'-listener-'+stamp+'-'+str(time.time_ns())+'.jsonl');stop=threading.Event()
         def monitor():
             with trace.open('w') as f:
                 os.chmod(trace,0o600)
@@ -315,7 +342,7 @@ def capacity(name, mode, rates=(5,20,50,80,100), duration=30):
     if route.get('dev')!=dev:raise ValueError('Test route does not use this TUN')
     stamp=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     dest=ROOT/'reports';dest.mkdir(mode=0o700,exist_ok=True)
-    path=dest/(name+'-capacity-'+stamp+'.zip');results=[]
+    path=dest/(name+'-capacity-'+stamp+'-'+str(time.time_ns())+'.zip');results=[]
     with zipfile.ZipFile(path,'w',zipfile.ZIP_DEFLATED) as z:
         os.chmod(path,0o600)
         for rate in rates:
@@ -406,7 +433,7 @@ def install(source):
         if rel in listed:raise ValueError('Duplicate release path')
         listed.add(rel)
         if hashlib.sha256(p.read_bytes()).hexdigest()!=digest:raise ValueError('Release checksum mismatch: '+rel)
-    required={'scripts/manage.py','dist/SHA256SUMS','dist/ggstunnel-linux-'+a}
+    required={'scripts/manage.py','internal/version/VERSION','dist/SHA256SUMS','dist/ggstunnel-linux-'+a}
     if not required.issubset(listed):raise ValueError('Incomplete release manifest')
     expected={}
     for line in (source/'dist/SHA256SUMS').read_text().splitlines():
@@ -483,7 +510,8 @@ def ask(label,default=''):
 def menu():
     while True:
         print('\nGGSTUNNEL '+VERSION+'\n1 Create Iran tunnel  2 Join from foreign  3 Status\n4 Start temporarily  5 Stop temporarily  6 Restart\n7 ON + boot enable  8 OFF + boot disable  9 Edit / forwards / restore config\n10 Delete tunnel  11 Show join code  12 Logs  13 Diagnostic report\n14 Capacity listener  15 Capacity test  16 Apply network tuning\n17 Restore tuning  18 Update from extracted package  19 Rollback release\n20 Sustained capacity test (10 minutes each direction/protocol)\n21 Apply BIP performance defaults to existing tunnels\n0 Exit\nActions 4-8 accept tunnel name or all. Temporary stop lasts until manual start or reboot.')
-        choice=ask('Choice')
+        try: choice=ask('Choice')
+        except (EOFError, KeyboardInterrupt): print(); return
         if choice=='0':return
         try:
             with (locked() if choice not in ('3','12','13','14','15','20') else contextlib.nullcontext()):
@@ -506,6 +534,10 @@ def menu():
                 elif choice=='19':rollback();return
                 elif choice=='21':optimize_existing()
                 elif choice=='20':capacity(select_name(),'client',(integer(ask('Rate Mbps','100'),1,1000),),600)
+                else: raise ValueError('Unknown menu option')
+            if choice == '18':
+                os.execv('/usr/local/bin/ggstunnel', ['ggstunnel'])
+                return
         except (Exception,KeyboardInterrupt) as e:print('ERROR:',str(e) or 'Interrupted')
 
 def optimize_existing():
@@ -513,7 +545,7 @@ def optimize_existing():
         if c['profile']!='bip':continue
         c.setdefault('tuner',{}).update(mode='adaptive',unlimited_rate=True,max_burst=128)
         c.setdefault('transport',{}).update(bip_pull_burst=128,bip_max_retries=8)
-        c['performance']['queue_size']=max(4096,c['performance'].get('queue_size',4096))
+        c['performance']['queue_size']=max(8192,c['performance'].get('queue_size',8192))
         c['tun']['tx_queue_len']=min(256,c['tun'].get('tx_queue_len',256))
         save_config(c,True)
     print('BIP performance defaults applied; both peers must run BIP5.')

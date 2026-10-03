@@ -38,6 +38,9 @@ const (
 	bipKindReady       byte = 10
 	bipFlagMore        byte = 1
 	bipFlagPulled      byte = 2
+	bipFlagWideSACK    byte = 4
+	bipLegacySpan           = 4096
+	bipWideSpan             = 8192
 	pendingModeFast    byte = 1
 	pendingModePull    byte = 2
 	pendingModeRequest byte = 3
@@ -45,6 +48,10 @@ const (
 
 var errBIPBadMAC = errors.New("bad MAC")
 var errBIPUnknownSession = errors.New("unknown session")
+
+// Recoverable only by creating a new authenticated identity, never by skipping
+// an undelivered ordered frame or reusing an encryption counter.
+var ErrBIPDeliveryTimeout = errors.New("BIP delivery timeout")
 
 type outData struct {
 	data    []byte
@@ -74,6 +81,8 @@ type wirePacket struct {
 	sack                   uint64
 	payload                []byte
 }
+
+type ackDelivery struct { seq uint32; sent time.Time }
 
 // The actor owns all handshake, path and delivery state.
 // PacketIO is an injectable outer-packet I/O backend. Receive returns an ICMP
@@ -113,6 +122,7 @@ type BIP struct {
 	master, sessionKey                                                                               []byte
 	gate                                                                                             *session.Gate
 	active                                                                                           uint64
+	peerSpan                                                                                         int
 	peerID                                                                                           atomic.Uint64
 	replay                                                                                           *frame.ReplayGuard
 	tx, rx, incoming                                                                                 chan []byte
@@ -433,7 +443,7 @@ func (b *BIP) recordRXSeqLocked(seq uint32) bool {
 		w.dirty = true
 		return false
 	}
-	if sequenceDistance(w.max, seq) > 4096 {
+	if sequenceDistance(w.max, seq) > uint32(b.window()) {
 		return false
 	}
 	w.seen[seq] = true
@@ -472,11 +482,11 @@ func (b *BIP) processPeerAckAt(ack uint32, bits uint64, now time.Time) bool {
 func (b *BIP) ackExtension(ack uint32) []byte {
 	b.ackMu.Lock()
 	defer b.ackMu.Unlock()
-	var words [63]uint64
+	var words [127]uint64
 	high := 0
 	for seq := range b.rxAck.seen {
 		d := sequenceDistance(ack, seq)
-		if d > 64 && d <= 4096 {
+		if d > 64 && d <= uint32(b.window()) {
 			i := (d-1)/64 - 1
 			words[i] |= uint64(1) << ((d - 1) % 64)
 			high = max(high, int(i)+1)
@@ -494,13 +504,13 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 	fast := false
 	clean := 0
 	var oldest time.Time
-	var delivered []uint32
+	var delivered []ackDelivery
 	accept := func(seq uint32) {
 		p := b.pending[seq]
 		if p == nil {
 			return
 		}
-		delivered = append(delivered, seq)
+		delivered = append(delivered, ackDelivery{seq: seq, sent: p.sent})
 		b.traceRecord(traceEvent{At: now, Event: "ack_accept", Seq: seq, Ack: ack, Sack: bits, Mode: p.mode, Retries: p.item.retries, AgeMS: float64(now.Sub(p.sent)) / float64(time.Millisecond)})
 		fast = fast || p.mode == pendingModeFast
 		if b.tuner != nil {
@@ -517,7 +527,7 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 	}
 	if seqAfter(ack, b.txAckBase) {
 		distance := sequenceDistance(b.txAckBase, ack)
-		if distance <= 4096 {
+		if distance <= uint32(b.window()) {
 			seq := b.txAckBase
 			for i := uint32(0); i < distance; i++ {
 				seq = nextSequence(seq)
@@ -677,6 +687,8 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.rxBuffered.Store(0)
 	b.ackMu.Unlock()
 	b.active = id
+	b.peerSpan = bipLegacySpan
+	if b.tuner != nil { b.tuner.maxWindow = min(b.cfg.Performance.QueueSize, bipLegacySpan) }
 	b.sessionKey = key
 	b.dataSeq = 0
 	b.lossFlightSet = false
@@ -789,7 +801,9 @@ func (b *BIP) handle(body []byte, now time.Time) {
 			}
 			proof := session.Proof(b.master, c)
 			payload := append(marshalChallenge(c), proof[:]...)
-			_ = b.send(responseType(p), p.id, p.tuple, bipKindProof, 0, 0, payload, p.sender)
+			capability := byte(0)
+			if b.cfg.Performance.QueueSize >= bipWideSpan { capability = bipFlagWideSACK }
+			_ = b.send(responseType(p), p.id, p.tuple, bipKindProof, capability, 0, payload, p.sender)
 			if b.active != p.sender {
 				b.issueChallenge(p, now)
 			}
@@ -813,6 +827,12 @@ func (b *BIP) handle(body []byte, now time.Time) {
 				b.fail(err)
 				return
 			}
+			// Capability is accepted only with a fresh receiver-issued challenge
+			// and a verified proof. Legacy peers ignore this flag and advertise 0.
+			if p.flags&bipFlagWideSACK != 0 {
+				b.peerSpan = bipWideSpan
+				if b.tuner != nil { b.tuner.resizeWindow(b.window()); b.publishTuner(now) }
+			}
 			_ = b.send(responseType(p), p.id, p.tuple, bipKindReady, 0, 0, nil, p.sender)
 		case bipKindReady: // READY never authorizes a session reset.
 		}
@@ -830,6 +850,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 	} else {
 		b.processPeerAckAt(p.ack, p.sack, now)
 	}
+	b.recoverPersistentHole(p.ack, p.sack, p.payload, p.kind == bipKindAck, now)
 	b.traceRecord(traceEvent{At: now, Event: "wire_rx", Seq: p.token, Ack: p.ack, Sack: p.sack, Kind: p.kind, Type: p.typ})
 	switch p.kind {
 	case bipKindFastProbe:
@@ -837,6 +858,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 		_ = b.send(responseType(p), p.id, p.tuple, bipKindFastAck, 0, p.token, nil, b.active)
 	case bipKindFastAck:
 		if p.token != 0 && p.token == b.fastToken && now.Before(b.fastDeadline) {
+			if !now.Before(b.fastUntil) { b.expeditePathRetries(now) }
 			b.fastUntil = now.Add(time.Duration(b.cfg.Transport.BIPFastTTLMS) * time.Millisecond)
 			b.fastToken = 0
 			b.fastAckRx.Add(1)
@@ -861,7 +883,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 		if duplicate {
 			w.dirty = true
 			b.dataDuplicate.Add(1)
-		} else if sequenceDistance(w.max, p.token) <= 4096 {
+		} else if sequenceDistance(w.max, p.token) <= uint32(b.window()) {
 			if !b.receiveOrdered(p.token, p.payload) {
 				b.pendingOverflow.Add(1)
 			}
@@ -876,12 +898,9 @@ func (b *BIP) handle(body []byte, now time.Time) {
 }
 func (b *BIP) window() int {
 	n := b.cfg.Performance.QueueSize
-	// BIP5 dedicated ACKs cover 4096 slots. A larger span can hide
-	// successfully received frames behind one missing cumulative ACK.
-	if n > 4096 {
-		n = 4096
-	}
-	return n
+	span := bipLegacySpan
+	if b.peerSpan == bipWideSpan { span = bipWideSpan }
+	return min(n, span)
 }
 func (b *BIP) deliverOne(typ byte, id, tuple uint16, mode byte, now time.Time) {
 	b.ackMu.Lock()
@@ -977,6 +996,9 @@ func (b *BIP) run(ctx context.Context) {
 			}
 			fast := now.Before(b.fastUntil)
 			b.drainRX()
+			// Keep reporting a retained hole even if its retransmission was lost
+			// and no new data can cross the cumulative-ACK horizon.
+			if len(b.rxHold) > 0 && b.ackDue.IsZero() && now.Sub(b.lastAck) >= 100*time.Millisecond { b.flushAck(now) }
 			if fast != b.fastHealthy.Swap(fast) {
 				if fast {
 					b.fastPromotions.Add(1)
@@ -1068,7 +1090,7 @@ func (b *BIP) run(ctx context.Context) {
 				}
 				if pd.item.retries >= b.cfg.Transport.BIPMaxRetries {
 					b.pendingExpired.Add(1)
-					b.fail(fmt.Errorf("BIP delivery timeout at %d", pd.item.seq))
+					b.fail(fmt.Errorf("%w at %d", ErrBIPDeliveryTimeout, pd.item.seq))
 					return
 				}
 				if b.tuner != nil {
@@ -1224,7 +1246,9 @@ func (b *BIP) decode(body []byte) (wirePacket, error) {
 	p.ack = binary.BigEndian.Uint32(body[44:48])
 	p.sack = binary.BigEndian.Uint64(body[48:56])
 	p.payload = body[72:]
-	if p.kind == bipKindAck && (len(p.payload) > 504 || len(p.payload)%8 != 0) {
+	span := bipLegacySpan
+	if b.peerSpan == bipWideSpan { span = bipWideSpan }
+	if p.kind == bipKindAck && (len(p.payload) > (span/64-1)*8 || len(p.payload)%8 != 0) {
 		return p, errors.New("invalid extended ACK")
 	}
 	if p.sender == 0 || p.number == 0 {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"ggstunnel/internal/carrier"
@@ -12,6 +13,9 @@ import (
 
 // Telemetry contains no PSK, session identity, public address or config dump.
 type Telemetry struct {
+	Recoveries             uint64                 `json:"internal_recoveries"`
+	Goroutines             int                    `json:"goroutines"`
+	HeapAllocBytes         uint64                 `json:"heap_alloc_bytes"`
 	SchemaVersion          int                    `json:"schema_version"`
 	At                     time.Time              `json:"at"`
 	Role                   string                 `json:"role"`
@@ -29,7 +33,12 @@ type Telemetry struct {
 }
 
 func (e *Engine) SnapshotTelemetry(now time.Time) Telemetry {
+	e.transportMu.RLock()
+	defer e.transportMu.RUnlock()
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
 	s := Telemetry{SchemaVersion: 1, At: now.UTC(), Role: e.cfg.Role, Profile: e.cfg.Profile,
+		Recoveries: e.recoveries.Load(), Goroutines: runtime.NumGoroutine(), HeapAllocBytes: memory.HeapAlloc,
 		TxReadPackets: e.txPackets.Load(), RxDeliveredPackets: e.rxPackets.Load(),
 		TxReadBytes: e.txBytes.Load(), RxDeliveredBytes: e.rxBytes.Load(), EnqueueDrops: e.drops.Load(),
 		Replays: e.replays.Load(), AuthenticationFailures: e.authFails.Load(), Malformed: e.malformed.Load()}

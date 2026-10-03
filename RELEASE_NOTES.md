@@ -1,4 +1,4 @@
-# v0.3.0-rc4 — short recovery validation and SACK loss recovery
+# v0.3.0-rc5 — short recovery validation and SACK loss recovery
 
 This release candidate prepares for field stability testing. Multi-day tests on the real Iran/foreign path remain with the operator. The BIP5 wire format is retained; upgrade both peers.
 

@@ -19,6 +19,7 @@ type bipTuner struct {
 }
 
 type TunerSnapshot struct {
+	WindowLimit    int     `json:"window_limit_frames"`
 	Mode           string  `json:"mode"`
 	SRTTMS         float64 `json:"srtt_ms"`
 	RTTVariationMS float64 `json:"rtt_variation_ms"`
@@ -30,6 +31,13 @@ type TunerSnapshot struct {
 	RTTSamples     uint64  `json:"rtt_samples"`
 	CongestionCuts uint64  `json:"congestion_cuts"`
 	Resets         uint64  `json:"resets"`
+}
+
+func (t *bipTuner) resizeWindow(limit int) {
+	if t.threshold >= float64(t.maxWindow) { t.threshold = float64(limit) }
+	t.maxWindow = limit
+	t.cwnd = math.Min(t.cwnd, float64(limit))
+	t.credit = math.Min(t.credit, float64(t.burst()))
 }
 
 func newBIPTuner(c *config.Config) *bipTuner {
@@ -179,7 +187,7 @@ func (t *bipTuner) timeout(retries int) time.Duration {
 }
 func (t *bipTuner) snapshot() TunerSnapshot {
 	if !t.adaptive() {
-		return TunerSnapshot{Mode: t.cfg.Mode, RTOMS: float64(t.initialRTO) / float64(time.Millisecond), Window: t.maxWindow, AckedFrames: t.acked, Resets: t.resets}
+		return TunerSnapshot{WindowLimit: t.maxWindow, Mode: t.cfg.Mode, RTOMS: float64(t.initialRTO) / float64(time.Millisecond), Window: t.maxWindow, AckedFrames: t.acked, Resets: t.resets}
 	}
-	return TunerSnapshot{Mode: t.cfg.Mode, SRTTMS: float64(t.srtt) / float64(time.Millisecond), RTTVariationMS: float64(t.variance) / float64(time.Millisecond), RTOMS: float64(t.rto) / float64(time.Millisecond), Window: t.window(), PacingPPS: t.rate(), Burst: t.burst(), AckedFrames: t.acked, RTTSamples: t.samples, CongestionCuts: t.cuts, Resets: t.resets}
+	return TunerSnapshot{WindowLimit: t.maxWindow, Mode: t.cfg.Mode, SRTTMS: float64(t.srtt) / float64(time.Millisecond), RTTVariationMS: float64(t.variance) / float64(time.Millisecond), RTOMS: float64(t.rto) / float64(time.Millisecond), Window: t.window(), PacingPPS: t.rate(), Burst: t.burst(), AckedFrames: t.acked, RTTSamples: t.samples, CongestionCuts: t.cuts, Resets: t.resets}
 }

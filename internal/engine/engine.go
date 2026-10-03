@@ -14,6 +14,7 @@ import (
 	"ggstunnel/internal/config"
 	"ggstunnel/internal/forward"
 	"ggstunnel/internal/frame"
+	"ggstunnel/internal/session"
 	"ggstunnel/internal/tun"
 )
 
@@ -24,6 +25,7 @@ type packetDevice interface {
 }
 
 type Engine struct {
+	transportMu sync.RWMutex
 	cfg     *config.Config
 	tun     packetDevice
 	carrier carrier.Carrier
@@ -41,6 +43,7 @@ type Engine struct {
 	authFails   atomic.Uint64
 	malformed   atomic.Uint64
 	lastRx      atomic.Int64
+	recoveries  atomic.Uint64
 }
 
 func New(c *config.Config) (*Engine, error) {
@@ -67,6 +70,27 @@ func New(c *config.Config) (*Engine, error) {
 }
 
 func (e *Engine) Run(ctx context.Context) error {
+	for {
+		err := e.runOnce(ctx)
+		if ctx.Err() != nil { return nil }
+		if e.cfg.Profile != "bip" || (!errors.Is(err, carrier.ErrBIPDeliveryTimeout) && !errors.Is(err, session.ErrRotationLimit)) { return err }
+		e.recoveries.Add(1)
+		log.Printf("recovering BIP with fresh authenticated identity: %v", err)
+		select {
+		case <-ctx.Done(): return nil
+		case <-time.After(time.Second):
+		}
+		fresh, nextErr := New(e.cfg)
+		if nextErr != nil { return nextErr }
+		// runOnce joins every worker before returning. New codecs generate fresh
+		// session IDs and keys; counters are never reset under an existing key.
+		e.transportMu.Lock()
+		e.carrier, e.codec, e.reasm = fresh.carrier, fresh.codec, fresh.reasm
+		e.transportMu.Unlock()
+	}
+}
+
+func (e *Engine) runOnce(ctx context.Context) error {
 	d, err := tun.Open(e.cfg.TUN.Name)
 	if err != nil {
 		return err
