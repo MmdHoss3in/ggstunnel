@@ -8,9 +8,6 @@ permissions:
 defaults:
   run:
     shell: bash
-defaults:
-  run:
-    shell: bash
 jobs:
   recover:
     strategy:
