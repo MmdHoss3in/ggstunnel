@@ -1,8 +1,8 @@
-# rc5 validation and known limits
+# 0.3.0 validation and known limits
 
 All compilation and runtime tests run in GitHub Actions. No Go/Python toolchain or test packages are installed on the user's workstation. Local inspection and artifact hash verification do not execute the release binary.
 
-The exact tag's required jobs are defined in [.github/workflows/ci.yml](.github/workflows/ci.yml) and the reusable [extended matrix](.github/workflows/extended.yml). A prerelease is created only after all jobs succeed. The extended summary rejects missing observations, duplicate recovery trial numbers, boundary-package failures and recorded case failures. Development failures remain visible in Actions history.
+The exact tag's required jobs are defined in [.github/workflows/ci.yml](.github/workflows/ci.yml) and the reusable [extended matrix](.github/workflows/extended.yml). A release is created only after all jobs succeed. The extended summary rejects missing observations, duplicate recovery trial numbers, boundary-package failures and recorded case failures. Development failures remain visible in Actions history.
 
 ## Required observations
 
@@ -35,10 +35,10 @@ For 60/60 successes, the exact one-sided 95% lower bound is 95.13% **only for th
 
 The operator will test multi-day Iran/foreign traffic and real Xray users. Cloud release assessment is scoped to the listed automated gates; multi-day field behavior remains unmeasured even if the release is designated stable. Sustained loss remains a material BIP throughput constraint; ordered delivery can hold other inner flows behind a missing frame. ICMP policing, asymmetric congestion, NAT and provider routing changes can impose further limits. Automatic outer PMTU discovery is not implemented: coordinate both peers' smaller TUN/payload configuration when needed.
 
-rc5 handles exhausted BIP retry/identity budgets and safe data-key lifetime limits using fresh transport/codec identity in the same process. It recreates TUN and forwarding listeners; individual user connections may need reconnecting. Unexpected kernel/configuration failures still rely on systemd. Short RSS/heap/FD/goroutine observations screen for defects but cannot exclude slow leaks.
+0.3.0 handles exhausted BIP retry/identity budgets and safe data-key lifetime limits using fresh transport/codec identity in the same process. It recreates TUN and forwarding listeners; individual user connections may need reconnecting. Unexpected kernel/configuration failures still rely on systemd. Short RSS/heap/FD/goroutine observations screen for defects but cannot exclude slow leaks.
 
 ## Historical evidence
 
-[The rc4 extended report](EXTENDED_VALIDATION.md) and [Persian report](EXTENDED_VALIDATION-fa.md) retain the earlier unchanged rc4 results and their limits. Their endpoint-egress topology and offload behavior differ from rc5; its TCP high-RTT numbers are not a controlled runtime comparison. Previous releases retain their own exact-build JSONL assets. Current results are appended to the rc5 GitHub Release with extended-report.md and extended-summary.json.
+[The rc4 extended report](EXTENDED_VALIDATION.md) and [Persian report](EXTENDED_VALIDATION-fa.md) retain the earlier unchanged rc4 results and their limits. Their endpoint-egress topology and offload behavior differ from 0.3.0; its TCP high-RTT numbers are not a controlled runtime comparison. Previous releases retain their own exact-build JSONL assets. Current results are appended to the 0.3.0 GitHub Release with extended-report.md and extended-summary.json.
 
 The 508 observations are heterogeneous scenario checks, not 508 independent samples of multi-day reliability. Confidence is reported only for the specified 60 short recovery trials. An extrapolation to another mission time or server population would require a validated usage/failure model; none is claimed. See [NIST reliability projection guidance](https://www.itl.nist.gov/div898/handbook/apr/section4/apr43.htm).

@@ -1,6 +1,6 @@
-# v0.3.0-rc5 — authenticated wider window, bounded recovery and installer transactions
+# v0.3.0 — authenticated wider window, bounded recovery and installer transactions
 
-This is the final *planned* prerelease before 0.3.0 stable. Publication is gated on the complete exact-source cloud matrix. Multi-day testing under real Iran/foreign routing and Xray users remains with the operator; short synthetic checks do not prove long-term reliability.
+This stable release is assessed against the complete exact-tagged-source cloud matrix, including useful throughput above 200Mbps and sustained-load screening on both architectures. Publication is gated on all required checks; failures or missing results block release creation. Multi-day testing under real Iran/foreign routing and Xray users remains with the operator; short synthetic checks do not prove long-term reliability.
 
 ## Changes since rc4
 
@@ -37,6 +37,6 @@ Clean BIP samples require 100Mbps; other clean carriers require 30Mbps. Lossy sa
 
 ## Install or update
 
-Use the pinned v0.3.0-rc5 bootstrap in README.md on both peers. Download ggstunnel-linux.tar.gz and SHA256SUMS, verify using sha256sum -c SHA256SUMS, extract and run sudo bash ggstunnel/setup.sh install. No Go toolchain is required on the server. Later sudo ggstunnel or setup.sh menu opens the installed menu offline, without dependency checks. For old BIP configurations, review and apply option 21 on both peers to enable the new window defaults.
+Use the pinned v0.3.0 bootstrap in README.md on both peers. Download ggstunnel-linux.tar.gz and SHA256SUMS, verify using sha256sum -c SHA256SUMS, extract and run sudo bash ggstunnel/setup.sh install. No Go toolchain is required on the server. Later sudo ggstunnel or setup.sh menu opens the installed menu offline, without dependency checks. For old BIP configurations, review and apply option 21 on both peers to enable the new window defaults.
 
 Additional required capacity coverage: 32 measured BIP transfers over 100/200/500/1000Mbps paths with 16 direct baselines, plus two ten-minute same-process load holds on amd64/arm64. The holds require receiver interval evidence, one-minute medians >=200Mbps, late median >=75% of early median, concurrent hashed-flow progress and bounded RSS. All 508 planned observations must be present and pass. Link rate is not a tunnel-speed promise. No accelerated multi-day reliability model is claimed.
