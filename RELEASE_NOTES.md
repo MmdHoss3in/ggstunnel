@@ -1,5 +1,15 @@
 # v0.3.0 — authenticated wider window, bounded recovery and installer transactions
 
+## v0.3.1-rc1 — unpublished recovery candidate
+
+- Retry authenticated HELLO/challenge exchanges after established-peer silence. Confirmation of the same identity retains ordered flight data, replay state and encryption counters, and resumes paced retry scheduling.
+- Bound established-peer silence with transport.bip_dead_timeout_sec (default 90 seconds, independent of idle_timeout_sec). On expiry, request engine recovery with a fresh codec/key identity. Kernel echo reflections cannot refresh this deadline. Hard recovery can interrupt application connections while recreating TUN/forward listeners.
+- Add peer_authenticated, peer_silence_ms and rehandshake_attempts telemetry. Logs expose suspension and silence; status distinguishes a running process from peer response, initial handshake, missing health data and stale telemetry. Peer response is not an application throughput check.
+- Ask for a transport port only for TCP/UDP; retain the unused join-code field for raw-carrier compatibility.
+- Add a cloud before/after regression against v0.3.0, repeated race checks on amd64/arm64, reflection/deadline tests, manager checks and real TUN delay/loss/outage checks. Candidate results are separate from earlier Stable measurements.
+
+This candidate does not implement independent BIP streams, automatic PMTU or a validated multi-day reliability model, and cannot recover a permanently blocked path. Review docs/stability-recovery.md before field testing. No new Stable release is implied by this branch.
+
 This stable release is assessed against the complete exact-tagged-source cloud matrix, including useful throughput above 200Mbps and sustained-load screening on both architectures. Publication is gated on all required checks; failures or missing results block release creation. Multi-day testing under real Iran/foreign routing and Xray users remains with the operator; short synthetic checks do not prove long-term reliability.
 
 ## Changes since rc4

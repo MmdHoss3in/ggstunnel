@@ -96,7 +96,7 @@ func (e *Engine) Run(ctx context.Context) error {
 // bounded delivery/session rotation failures; unexpected errors remain fatal.
 func (e *Engine) recoverable(err error) bool {
 	return errors.Is(err, frame.ErrKeyLifetime) || (e.cfg.Profile == "bip" &&
-		(errors.Is(err, carrier.ErrBIPDeliveryTimeout) || errors.Is(err, session.ErrRotationLimit)))
+		(errors.Is(err, carrier.ErrBIPDeliveryTimeout) || errors.Is(err, carrier.ErrBIPPeerUnresponsive) || errors.Is(err, session.ErrRotationLimit)))
 }
 
 func (e *Engine) refreshTransport() error {
@@ -355,6 +355,8 @@ func (e *Engine) statsLoop(ctx context.Context) {
 					cs.FastAckRx, cs.NeedPullRx, cs.PullProbeRx, cs.ReflectionsSuppressed, cs.PayloadFrameRx, cs.HMACFail, cs.DataDuplicate,
 					cs.Pending, cs.Backlog, cs.Retransmits, cs.PendingExpired, cs.PendingOverflow, cs.FastPromotions, cs.FastDemotions, cs.FastHealthy, cs.PullActive, cs.CompatActive, cs.TxErrors)
 				lastWireTx, lastWireRx = cs.WireTxBytes, cs.WireRxBytes
+				base += fmt.Sprintf(" health{authenticated=%t silent=%dms suspended=%t rehandshake=%d}",
+					cs.PeerAuthenticated, cs.PeerSilenceMS, cs.PathSuspended, cs.RehandshakeTries)
 			}
 			if c, ok := e.carrier.(interface{ SnapshotTuner() carrier.TunerSnapshot }); ok {
 				s := c.SnapshotTuner()

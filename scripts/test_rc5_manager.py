@@ -76,6 +76,23 @@ class RC5ManagerTests(unittest.TestCase):
    self.assertEqual(values,original);self.assertFalse((self.root/'network-before.json').exists())
    m.tune();file.write_text('# externally changed\n');values['net.core.rmem_max']='33554432';m.tune(True)
    self.assertEqual(file.read_text(),'# externally changed\n');self.assertEqual(values['net.core.rmem_max'],'33554432')
+ def test_raw_transports_do_not_request_unused_port(self):
+  for profile in ('bip','icmp','gre','tcp','udp'):
+   values=[profile,'198.51.100.10','203.0.113.20']+(['25001'] if profile in ('tcp','udp') else [])
+   with patch.object(m,'configs',return_value={}),patch.object(m,'ask',side_effect=values) as ask,patch.object(m,'save_config') as save,contextlib.redirect_stdout(io.StringIO()):
+    m.create_server()
+   self.assertEqual(ask.call_count,4 if profile in ('tcp','udp') else 3)
+   self.assertEqual(save.call_args.args[0]['transport']['l4_port'],25001 if profile in ('tcp','udp') else 24001)
+ def test_peer_health_separates_process_and_peer(self):
+  with patch.object(m,'RUN',self.root):
+   self.assertEqual(m.peer_health('ggs01'),'HEALTH UNKNOWN')
+   for carrier,expected in [({'peer_authenticated':False},'HANDSHAKING'),({'peer_authenticated':True},'PEER RESPONDING'),({'peer_authenticated':True,'path_suspended':True},'NO PEER RESPONSE'),({},'HEALTH UNKNOWN'),([], 'HEALTH UNKNOWN')]:
+    m.atomic(self.root/'ggs01.json',json.dumps({'carrier':carrier}))
+    self.assertEqual(m.peer_health('ggs01'),expected)
+   with patch.object(m.time,'time',return_value=(self.root/'ggs01.json').stat().st_mtime+20):
+    self.assertEqual(m.peer_health('ggs01'),'STALE TELEMETRY')
+   m.atomic(self.root/'ggs01.json','{broken')
+   self.assertEqual(m.peer_health('ggs01'),'HEALTH UNKNOWN')
  def test_every_menu_option_dispatches(self):
   route={'1':'create_server','2':'join_client','3':'status','9':'edit','10':'delete','11':'encode_join',
          '12':'run_logs','13':'diagnose','14':'capacity','15':'capacity','16':'tune','17':'tune',

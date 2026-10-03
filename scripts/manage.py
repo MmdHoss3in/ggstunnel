@@ -222,9 +222,10 @@ def create_server():
     if not index: raise ValueError('No free IDs')
     print('Transports: tcp / udp / bip / icmp / gre. BIP5 performance candidate: both peers require this release.')
     profile = ask('Transport', 'bip').lower()
+    if profile not in PROFILES: raise ValueError('Unsupported transport')
     server = ipv4(ask('Iran public IPv4'))
     peer = ipv4(ask('Foreign public IPv4'))
-    port = integer(ask('Port (TCP/UDP only)', str(24000+index)), 1024,65535)
+    port = integer(ask('Tunnel transport port (TCP/UDP)', str(24000+index)), 1024,65535) if profile in ('tcp','udp') else 24000+index
     c = make_config(index, profile, server, peer, port, secrets.token_hex(32), 'server')
     save_config(c)
     print('Copy this SECRET join code to the foreign server (contains PSK):\n' + encode_join(c))
@@ -245,12 +246,27 @@ def join_client():
 def select_name():
     status(); return name_ok(ask('Tunnel name, e.g. ggs01'))
 
+def peer_health(name, interval=2):
+    try:
+        path = RUN/(name+'.json')
+        if time.time()-path.stat().st_mtime > max(15,3*interval): return 'STALE TELEMETRY'
+        stats = json.loads(path.read_text())
+        carrier = stats.get('carrier',{})
+        if not isinstance(carrier,dict): return 'HEALTH UNKNOWN'
+        if carrier.get('path_suspended') is True: return 'NO PEER RESPONSE'
+        if carrier.get('peer_authenticated') is False: return 'HANDSHAKING'
+        if carrier.get('peer_authenticated') is True: return 'PEER RESPONDING'
+    except (OSError,ValueError,AttributeError): pass
+    return 'HEALTH UNKNOWN'
+
 def status():
     entries = configs(strict=False)
     for name,c in entries.items():
         p = run(['systemctl','is-enabled',unit(name)],check=False)
+        running = active(name)
+        health = peer_health(name,c.get('telemetry',{}).get('interval_sec',2)) if running and c['profile']=='bip' else ''
         print(name, c['role'], c['profile'], c['tun']['local_addr'], '<->', c['tun']['remote_addr'],
-              'RUNNING' if active(name) else 'STOPPED', p.stdout.strip())
+              'RUNNING' if running else 'STOPPED', p.stdout.strip(), health)
     if not entries: print('No valid configured tunnels')
 
 def action(verb, name):

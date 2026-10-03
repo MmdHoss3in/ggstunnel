@@ -81,6 +81,8 @@ type TransportConfig struct {
 	BIPMaxRetries    int `json:"bip_max_retries"`
 	ICMPType         int `json:"icmp_type"`
 	ICMPCode         int `json:"icmp_code"`
+
+	BIPDeadTimeoutSec int `json:"bip_dead_timeout_sec"`
 }
 
 type PerformanceConfig struct {
@@ -212,6 +214,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Transport.BIPMaxRetries == 0 {
 		c.Transport.BIPMaxRetries = 8
+	}
+	if c.Transport.BIPDeadTimeoutSec == 0 {
+		c.Transport.BIPDeadTimeoutSec = 90
 	}
 	if c.Transport.ICMPType == 0 {
 		c.Transport.ICMPType = 8
@@ -373,6 +378,10 @@ func (c *Config) Validate() error {
 		}
 		if c.Transport.BIPMaxRetries < 0 || c.Transport.BIPMaxRetries > 32 {
 			return errors.New("bip_max_retries must be 0..32")
+		}
+		if c.Transport.BIPDeadTimeoutSec < 1 || c.Transport.BIPDeadTimeoutSec > 86400 ||
+			time.Duration(c.Transport.BIPDeadTimeoutSec)*time.Second <= time.Duration(c.Transport.BIPFastTTLMS)*time.Millisecond {
+			return errors.New("transport.bip_dead_timeout_sec must be 1..86400 and exceed bip_fast_ttl_ms")
 		}
 
 		if c.Performance.MaxFramePayload > 1348 {

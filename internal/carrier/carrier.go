@@ -23,6 +23,10 @@ type RuntimeStats struct {
 	WireTxBytes uint64 `json:"wire_tx_bytes"`
 	WireRxBytes uint64 `json:"wire_rx_bytes"`
 
+	PeerAuthenticated bool   `json:"peer_authenticated"`
+	PeerSilenceMS     int64  `json:"peer_silence_ms"`
+	RehandshakeTries  uint64 `json:"rehandshake_attempts"`
+
 	FastDataTx      uint64 `json:"fast_data_tx"`
 	PullDataTx      uint64 `json:"pull_data_tx"`
 	BootstrapDataTx uint64 `json:"bootstrap_data_tx"`

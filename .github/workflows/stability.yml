@@ -1,0 +1,69 @@
+name: BIP field recovery regression
+on:
+  push:
+    branches: [fix/bip-silent-recovery]
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+defaults:
+  run:
+    shell: bash
+jobs:
+  recover:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Capture formatting changes for review
+        run: |
+          mkdir -p stability-artifacts
+          gofmt -w cmd internal
+          git diff -- cmd internal > stability-artifacts/gofmt.patch
+          test ! -s stability-artifacts/gofmt.patch
+      - name: Prove the regression fails against v0.3.0
+        run: |
+          BASE=$(mktemp -d)
+          git archive 1251803db9da3af7611dfd8c15fc74c73a276f34 | tar -x -C "$BASE"
+          cp internal/carrier/rehandshake_integration_test.go "$BASE/internal/carrier/"
+          set +e
+          (cd "$BASE" && go test -race ./internal/carrier -run '^TestBIPAuthenticatedRehandshakeRestoresQueuedData$' -count=1 -timeout 20s -v) > stability-artifacts/baseline.log 2>&1
+          result=$?
+          set -e
+          cat stability-artifacts/baseline.log
+          test "$result" -ne 0
+          grep -q 'authenticated rehandshake did not restore queued data' stability-artifacts/baseline.log
+      - name: Repeat repaired recovery and audit under race detection
+        run: |
+          go vet ./...
+          go test -race -tags audit -short -count=1 -timeout 5m ./... | tee stability-artifacts/race.log
+          go test -race ./internal/carrier -run '^TestBIPAuthenticatedRehandshakeRestoresQueuedData$' -count=20 -timeout 2m -v | tee stability-artifacts/rehandshake.log
+          python3 scripts/check_version.py
+          bash -n setup.sh install.sh scripts/build-release.sh
+      - name: Build binaries and exercise manager and installer
+        run: |
+          bash scripts/build-release.sh
+          python3 -m unittest discover -s scripts -p 'test_*.py' -v
+          sudo env GITHUB_ACTIONS=true python3 scripts/smoke_systemd.py
+      - name: Real TUN delay loss and outage checks
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool
+          sudo env GITHUB_ACTIONS=true GGS_RESULTS="$PWD/stability-artifacts/network-results.jsonl" GGS_RECOVERY_RESULTS="$PWD/stability-artifacts/recovery-results.jsonl" python3 scripts/test_netns.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stability-${{ matrix.runner }}
+          path: stability-artifacts/

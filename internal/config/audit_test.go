@@ -35,3 +35,16 @@ func TestAuditPreserveExplicitMTU(t *testing.T) {
 		t.Fatalf("explicit MTU replaced with %d", c.TUN.MTU)
 	}
 }
+
+func TestAuditBIPDeadTimeoutBounds(t *testing.T) {
+	c := auditConfig()
+	if c.Transport.BIPDeadTimeoutSec != 90 {
+		t.Fatal("legacy config did not receive the bounded recovery default")
+	}
+	for _, value := range []int{-1, 1, 86401} {
+		c.Transport.BIPDeadTimeoutSec = value
+		if err := c.Validate(); err == nil {
+			t.Fatalf("unsafe BIP dead timeout accepted: %d", value)
+		}
+	}
+}

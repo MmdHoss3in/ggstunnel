@@ -55,6 +55,9 @@ var errBIPUnknownSession = errors.New("unknown session")
 // an undelivered ordered frame or reusing an encryption counter.
 var ErrBIPDeliveryTimeout = errors.New("BIP delivery timeout")
 
+// Recovery requires a fresh codec identity as well as a new carrier.
+var ErrBIPPeerUnresponsive = errors.New("BIP peer unresponsive")
+
 type outData struct {
 	data    []byte
 	seq     uint32
@@ -164,6 +167,9 @@ type BIP struct {
 
 	fastRetries atomic.Uint64
 	rxBuffered  atomic.Uint64
+
+	peerSilenceMS    atomic.Int64
+	rehandshakeTries atomic.Uint64
 }
 
 func NewBIP(c *config.Config) (Carrier, error) {
@@ -844,7 +850,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 				b.fail(err)
 				return
 			}
-			b.lastPeerActivity = now
+			b.observePeerActivity(now)
 			// Capability is accepted only with a fresh receiver-issued challenge
 			// and a verified proof. Legacy peers ignore this flag and advertise 0.
 			if p.flags&bipFlagWideSACK != 0 {
@@ -1028,6 +1034,10 @@ func (b *BIP) run(ctx context.Context) {
 			b.lastTick = now
 			if now.Sub(b.lastTuning) >= 100*time.Millisecond {
 				b.publishTuner(now)
+			}
+			if err := b.maintainPeerLiveness(now); err != nil {
+				b.fail(err)
+				return
 			}
 			if b.active == 0 && now.Sub(b.lastHello) >= 500*time.Millisecond {
 				id, s := b.nextTuple()
@@ -1326,5 +1336,5 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 	b.ackMu.Lock()
 	pending := len(b.pending)
 	b.ackMu.Unlock()
-	return RuntimeStats{PathSuspended: b.pathSuspended.Load(), FastRetransmits: b.fastRetries.Load(), ReorderBuffered: b.rxBuffered.Load(), WireTxBytes: b.wireTxBytes.Load(), WireRxBytes: b.wireRxBytes.Load(), FastDataTx: b.fastDataTx.Load(), PullDataTx: b.pullDataTx.Load(), CompatDataTx: b.compatDataTx.Load(), IdleProbeTx: b.idleProbeTx.Load(), FastProbeTx: b.fastProbeTx.Load(), FastAckTx: b.fastAckTx.Load(), NeedPullTx: b.needPullTx.Load(), PullProbeTx: b.pullProbeTx.Load(), FastAckRx: b.fastAckRx.Load(), NeedPullRx: b.needPullRx.Load(), PullProbeRx: b.pullProbeRx.Load(), ReflectionsSuppressed: b.reflectionsSuppressed.Load(), PayloadFrameRx: b.payloadFrameRx.Load(), HMACFail: b.hmacFail.Load(), MalformedWire: b.malformedWire.Load(), UnknownSession: b.unknownSession.Load(), DataDuplicate: b.dataDuplicate.Load(), Pending: uint64(pending), Backlog: uint64(len(b.tx)), Retransmits: b.retransmits.Load(), PendingExpired: b.pendingExpired.Load(), PendingOverflow: b.pendingOverflow.Load(), FastPromotions: b.fastPromotions.Load(), FastDemotions: b.fastDemotions.Load(), FastHealthy: b.fastHealthy.Load(), PullActive: b.pullActive.Load(), CompatActive: b.compatActive.Load(), TxErrors: b.txErrors.Load()}
+	return RuntimeStats{PeerAuthenticated: b.peerID.Load() != 0, PeerSilenceMS: b.peerSilenceMS.Load(), RehandshakeTries: b.rehandshakeTries.Load(), PathSuspended: b.pathSuspended.Load(), FastRetransmits: b.fastRetries.Load(), ReorderBuffered: b.rxBuffered.Load(), WireTxBytes: b.wireTxBytes.Load(), WireRxBytes: b.wireRxBytes.Load(), FastDataTx: b.fastDataTx.Load(), PullDataTx: b.pullDataTx.Load(), CompatDataTx: b.compatDataTx.Load(), IdleProbeTx: b.idleProbeTx.Load(), FastProbeTx: b.fastProbeTx.Load(), FastAckTx: b.fastAckTx.Load(), NeedPullTx: b.needPullTx.Load(), PullProbeTx: b.pullProbeTx.Load(), FastAckRx: b.fastAckRx.Load(), NeedPullRx: b.needPullRx.Load(), PullProbeRx: b.pullProbeRx.Load(), ReflectionsSuppressed: b.reflectionsSuppressed.Load(), PayloadFrameRx: b.payloadFrameRx.Load(), HMACFail: b.hmacFail.Load(), MalformedWire: b.malformedWire.Load(), UnknownSession: b.unknownSession.Load(), DataDuplicate: b.dataDuplicate.Load(), Pending: uint64(pending), Backlog: uint64(len(b.tx)), Retransmits: b.retransmits.Load(), PendingExpired: b.pendingExpired.Load(), PendingOverflow: b.pendingOverflow.Load(), FastPromotions: b.fastPromotions.Load(), FastDemotions: b.fastDemotions.Load(), FastHealthy: b.fastHealthy.Load(), PullActive: b.pullActive.Load(), CompatActive: b.compatActive.Load(), TxErrors: b.txErrors.Load()}
 }
