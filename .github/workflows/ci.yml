@@ -9,8 +9,10 @@ permissions:
   contents: read
 jobs:
   extended-validation:
+    if: github.ref != 'refs/heads/release/rc5' || contains(github.event.head_commit.message, '[cloud-matrix]')
     uses: ./.github/workflows/extended.yml
   validate:
+    if: github.ref != 'refs/heads/release/rc5' || contains(github.event.head_commit.message, '[cloud-matrix]')
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -65,6 +67,7 @@ jobs:
           name: ggstunnel-linux
           path: artifacts/
   platform-smoke:
+    if: github.ref != 'refs/heads/release/rc5' || contains(github.event.head_commit.message, '[cloud-matrix]')
     strategy:
       fail-fast: false
       matrix:

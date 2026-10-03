@@ -24,6 +24,7 @@ const (
 
 var (
 	magic             = [4]byte{'G', 'G', 'S', '1'}
+	ErrKeyLifetime    = errors.New("data key lifetime exceeded; fresh identity required")
 	ErrMalformed      = errors.New("malformed frame")
 	ErrReflectedLocal = errors.New("reflected local frame")
 	ErrReplay         = errors.New("replayed or stale frame")
@@ -106,7 +107,7 @@ func (c *Codec) Seal(typ byte, packetID uint32, fragIndex, fragCount uint16, pay
 	}
 	h := Header{Type: typ, SessionID: c.sessionID, Seq: c.seq.Add(1), PacketID: packetID, FragIndex: fragIndex, FragCount: fragCount}
 	if h.Seq > 1<<32 {
-		return nil, errors.New("data key lifetime exceeded; restart/rekey required")
+		return nil, ErrKeyLifetime
 	}
 	hb := marshalHeader(h)
 	nonce := make([]byte, c.aead.NonceSize())

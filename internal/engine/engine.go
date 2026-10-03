@@ -75,26 +75,40 @@ func (e *Engine) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if e.cfg.Profile != "bip" || (!errors.Is(err, carrier.ErrBIPDeliveryTimeout) && !errors.Is(err, session.ErrRotationLimit)) {
+		if !e.recoverable(err) {
 			return err
 		}
 		e.recoveries.Add(1)
-		log.Printf("recovering BIP with fresh authenticated identity: %v", err)
+		log.Printf("recovering transport with fresh authenticated identity: %v", err)
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-time.After(time.Second):
 		}
-		fresh, nextErr := New(e.cfg)
-		if nextErr != nil {
+		if nextErr := e.refreshTransport(); nextErr != nil {
 			return nextErr
 		}
-		// runOnce joins every worker before returning. New codecs generate fresh
-		// session IDs and keys; counters are never reset under an existing key.
-		e.transportMu.Lock()
-		e.carrier, e.codec, e.reasm = fresh.carrier, fresh.codec, fresh.reasm
-		e.transportMu.Unlock()
 	}
+}
+
+// Key lifetime exhaustion always requires a new sender key. BIP also recovers
+// bounded delivery/session rotation failures; unexpected errors remain fatal.
+func (e *Engine) recoverable(err error) bool {
+	return errors.Is(err, frame.ErrKeyLifetime) || (e.cfg.Profile == "bip" &&
+		(errors.Is(err, carrier.ErrBIPDeliveryTimeout) || errors.Is(err, session.ErrRotationLimit)))
+}
+
+func (e *Engine) refreshTransport() error {
+	fresh, err := New(e.cfg)
+	if err != nil {
+		return err
+	}
+	// runOnce joins every worker first. New codecs generate fresh IDs/keys;
+	// counters are never reset under an existing encryption key.
+	e.transportMu.Lock()
+	e.carrier, e.codec, e.reasm = fresh.carrier, fresh.codec, fresh.reasm
+	e.transportMu.Unlock()
+	return nil
 }
 
 func (e *Engine) runOnce(ctx context.Context) error {
