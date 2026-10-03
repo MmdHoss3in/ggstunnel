@@ -45,9 +45,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y iperf3
-          sudo python3 scripts/test_netns.py
+          mkdir -p artifacts
+          sudo env GGS_RESULTS="$PWD/artifacts/network-results.jsonl" python3 scripts/test_netns.py
           for profile in tcp udp icmp gre; do
-            sudo env GGS_TEST_PROFILE="$profile" python3 scripts/test_netns.py
+            sudo env GGS_TEST_PROFILE="$profile" GGS_RESULTS="$PWD/artifacts/network-results.jsonl" python3 scripts/test_netns.py
           done
       - name: Package verified source and binaries
         run: |
@@ -77,4 +78,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           test "$GITHUB_REF_NAME" = 'v0.3.0-rc2'
-          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS --verify-tag --prerelease --title "ggstunnel $GITHUB_REF_NAME — BIP5 recovery and installer" --notes-file RELEASE_NOTES.md
+          python3 scripts/render_release_notes.py
+          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl --verify-tag --prerelease --title "ggstunnel $GITHUB_REF_NAME — BIP5 recovery and installer" --notes-file artifacts/release-notes.md

@@ -13,13 +13,13 @@ Required release checks:
 
 ## Measurements during development
 
-[Run 37101380367](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37101380367) tested commit `db9f23d` before the final TCP backpressure change. Each measured TCP transfer used four streams for eight seconds, with a netem link capped at 100Mbps and a base RTT of 80ms. Directions ran sequentially and shared tunnel/controller state; these are diagnostic samples, not statistically controlled benchmarks.
+[Run 37101380367](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37101380367) tested commit `db9f23d` before the final TCP backpressure and socket autotuning changes. Each measured TCP transfer used four streams for eight seconds, with a netem link capped at 100Mbps and a base RTT of 80ms. Directions ran sequentially and shared tunnel/controller state; these are diagnostic samples, not statistically controlled benchmarks.
 
 | Carrier | Applied loss per direction | Forward receive Mbps | Reverse receive Mbps |
 |---|---:|---:|---:|
 | BIP5 | 0% | 69.939 | 78.642 |
 | BIP5 | 0.2% | 6.749 | 3.408 |
-| TCP (before final backpressure fix) | 0% | 14.884 | 15.204 |
+| TCP (before final TCP fixes) | 0% | 14.884 | 15.204 |
 | UDP | 0% | 83.938 | 84.539 |
 | ICMP | 0% | 78.911 | 84.408 |
 | GRE | 0% | 82.641 | 83.483 |

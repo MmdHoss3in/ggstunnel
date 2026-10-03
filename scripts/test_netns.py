@@ -74,6 +74,9 @@ def main():
                     rate=data['end']['sum_received']['bits_per_second']/1e6
                     row={'profile':profile,'loss':loss,'reverse':reverse,'received_mbps':round(rate,3)}
                     print(json.dumps(row),flush=True);results.append(row)
+                    if os.environ.get('GGS_RESULTS'):
+                        with Path(os.environ['GGS_RESULTS']).open('a') as report:
+                            report.write(json.dumps(row)+'\n')
                     floor=10 if loss=='0%' else 1
                     if rate<floor:raise RuntimeError(f'Real TUN throughput collapsed below {floor} Mbps')
                     server.wait(timeout=5)

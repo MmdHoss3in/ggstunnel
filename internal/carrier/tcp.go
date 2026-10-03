@@ -122,8 +122,9 @@ func (t *TCP) tune(c net.Conn) {
 		tc.SetNoDelay(true)
 		tc.SetKeepAlive(true)
 		tc.SetKeepAlivePeriod(15 * time.Second)
-		tc.SetReadBuffer(t.cfg.Transport.SockBuf)
-		tc.SetWriteBuffer(t.cfg.Transport.SockBuf)
+		// Explicit SO_RCVBUF/SO_SNDBUF locks disable Linux TCP autotuning
+		// and may be clamped by net.core.*mem_max to a tiny WAN window.
+		// Leave TCP sizing to the kernel; SockBuf is for datagram carriers.
 	}
 }
 func (t *TCP) session(parent context.Context, c net.Conn) {
