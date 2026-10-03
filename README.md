@@ -4,7 +4,7 @@
 
 ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سرورها و عبور ترافیک سرویس‌هایی مثل Xray است. هسته با Go و منوی مدیریت با Python نوشته شده است. پروتکل اصلی **BIP5 روی ICMP** است؛ TCP، UDP، ICMP خام و GRE اختصاصی نیز پشتیبانی می‌شوند.
 
-**نسخهٔ فعلی: `v0.3.0-rc3`، نامزد انتشار.** تست‌های خودکار جای آزمایش مسیر واقعی ایران–خارج یا پایداری چندروزه را نمی‌گیرند. سرعت تضمین‌شده یا ادعای عبور از هر نوع محدودیت شبکه نداریم.
+**نسخهٔ فعلی: `v0.3.0-rc4`، نامزد انتشار.** تست‌های خودکار جای آزمایش مسیر واقعی ایران–خارج یا پایداری چندروزه را نمی‌گیرند. سرعت تضمین‌شده یا ادعای عبور از هر نوع محدودیت شبکه نداریم.
 
 ## نصب از GitHub Release
 
@@ -13,7 +13,7 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.0-rc3/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.0-rc4/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh install
 ```
 
@@ -107,7 +107,7 @@ sudo ggstunnel diagnose all
 ## ارتقا و بازگشت
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.0-rc3/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.0-rc4/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh update
 ```
 

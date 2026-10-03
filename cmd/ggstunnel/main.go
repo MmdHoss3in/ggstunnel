@@ -12,9 +12,10 @@ import (
 
 	"ggstunnel/internal/config"
 	"ggstunnel/internal/engine"
+	"ggstunnel/internal/version"
 )
 
-var version = "0.3.0-rc3"
+var buildVersion = version.Version
 
 func main() {
 	cfgPath := flag.String("c", "", "path to JSON config")
@@ -24,7 +25,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print version")
 	flag.Parse()
 	if *showVersion {
-		fmt.Println("ggstunnel", version)
+		fmt.Println("ggstunnel", buildVersion)
 		return
 	}
 	if *gen != "" {

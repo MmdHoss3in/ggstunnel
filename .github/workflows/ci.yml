@@ -22,6 +22,7 @@ jobs:
           test -z "$(gofmt -l cmd internal)"
           go vet ./...
           bash -n setup.sh install.sh scripts/build-release.sh
+          python3 scripts/check_version.py
       - name: Race and audit tests
         run: go test -race -tags audit -short -count=1 -timeout 5m ./...
       - name: Fuzz authenticated wire parsers and tuner
@@ -46,7 +47,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y iperf3
           mkdir -p artifacts
-          sudo env GGS_RESULTS="$PWD/artifacts/network-results.jsonl" python3 scripts/test_netns.py
+          sudo env GGS_RESULTS="$PWD/artifacts/network-results.jsonl" GGS_RECOVERY_RESULTS="$PWD/artifacts/recovery-results.jsonl" python3 scripts/test_netns.py
           for profile in tcp udp icmp gre; do
             sudo env GGS_TEST_PROFILE="$profile" GGS_RESULTS="$PWD/artifacts/network-results.jsonl" python3 scripts/test_netns.py
           done
@@ -73,10 +74,12 @@ jobs:
         with:
           name: ggstunnel-linux
           path: artifacts
-      - name: Publish tested prerelease
+      - name: Publish tested version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$GITHUB_REF_NAME" = 'v0.3.0-rc3'
+          test "$GITHUB_REF_NAME" = "v$(cat internal/version/VERSION)"
           python3 scripts/render_release_notes.py
-          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl --verify-tag --prerelease --title "ggstunnel $GITHUB_REF_NAME — BIP5 recovery and installer" --notes-file artifacts/release-notes.md
+          flags=(--latest)
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl artifacts/recovery-results.jsonl --verify-tag "${flags[@]}" --title "ggstunnel $GITHUB_REF_NAME" --notes-file artifacts/release-notes.md

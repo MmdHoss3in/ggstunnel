@@ -1,4 +1,4 @@
-# v0.3.0-rc3 — BIP5 recovery, bounded backpressure and offline menu
+# v0.3.0-rc4 — BIP5 recovery, bounded backpressure and offline menu
 
 This release candidate keeps the BIP5 wire format. Upgrade both peers to benefit from the new sender and receiver behavior.
 

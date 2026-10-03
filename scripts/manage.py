@@ -26,7 +26,7 @@ ROOT = Path('/etc/ggstunnel')
 OPT = Path('/opt/ggstunnel')
 UNITS = Path('/etc/systemd/system')
 RUN = Path('/run/ggstunnel')
-VERSION = '0.3.0-rc3'
+VERSION = (Path(__file__).resolve().parents[1]/'internal/version/VERSION').read_text().strip()
 PROFILES = ('bip', 'tcp', 'udp', 'icmp', 'gre')
 
 def run(args, check=True, timeout=90):
@@ -429,7 +429,7 @@ def install(source):
         for n in running:run(['systemctl','restart',unit(n)],check=False)
         raise
     if previous and previous!=release:symlink(previous,OPT/'previous')
-    print('Installed',release_version,'(release candidate). Run: sudo ggstunnel')
+    print('Installed',release_version,'Run: sudo ggstunnel')
 
 def rollback():
     target=OPT/'previous'

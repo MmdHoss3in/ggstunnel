@@ -64,7 +64,7 @@ def main():
                     time.sleep(.2)
             else: raise RuntimeError('Encrypted TUN never became reachable')
             results=[]
-            for loss in (('0%','0.2%') if profile=='bip' else ('0%',)):
+            for loss in (('0%','0.2%','1%') if profile=='bip' else ('0%',)):
                 for i,n in enumerate(names):
                     dev=('ggs-ci-va','ggs-ci-vb')[i]
                     run('ip','netns','exec',n,'tc','qdisc','change','dev',dev,'root','netem','delay','40ms','loss',loss,'rate','100mbit')
@@ -84,6 +84,72 @@ def main():
                     floor=10 if loss=='0%' else 1
                     if rate<floor:raise RuntimeError(f'Real TUN throughput collapsed below {floor} Mbps')
                     server.wait(timeout=5)
+            if profile == 'bip':
+                def shape(loss='0%', delay='40ms'):
+                    for i,n in enumerate(names):
+                        run('ip','netns','exec',n,'tc','qdisc','change','dev',('ggs-ci-va','ggs-ci-vb')[i],
+                            'root','netem','delay',delay,'loss',loss,'rate','100mbit')
+
+                def reachable():
+                    begin=time.monotonic()
+                    for attempt in range(15):
+                        if any(p.poll() is not None for p in processes[:2]):
+                            raise RuntimeError('Tunnel process exited during recovery')
+                        try:
+                            run('ip','netns','exec',names[0],'ping','-c','1','-W','1','10.77.1.2',timeout=3)
+                            return round(time.monotonic()-begin,3)
+                        except subprocess.SubprocessError:
+                            time.sleep(.2)
+                    raise RuntimeError('Tunnel did not recover')
+
+                def report(case, **values):
+                    row=dict(profile=profile,case=case,status='pass',**values)
+                    print(json.dumps(row),flush=True)
+                    destination=os.environ.get('GGS_RECOVERY_RESULTS')
+                    if destination:
+                        with Path(destination).open('a') as output:output.write(json.dumps(row)+'\n')
+
+                shape()
+                reachable()
+                server=subprocess.Popen(['ip','netns','exec',names[1],'iperf3','-s','-1'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                processes.append(server);time.sleep(.25)
+                client=subprocess.Popen(['ip','netns','exec',names[0],'iperf3','-c','10.77.1.2','-t','14','-P','1','-J'],
+                                        stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+                processes.append(client)
+                time.sleep(2)
+                try:
+                    shape('100%');time.sleep(3)
+                finally:shape()
+                recovery=reachable()
+                stdout,stderr=client.communicate(timeout=40)
+                if client.returncode:raise RuntimeError('Established TCP flow failed after outage: '+stderr)
+                data=json.loads(stdout)
+                if 'error' in data:raise RuntimeError(data['error'])
+                rate=data['end']['sum_received']['bits_per_second']/1e6
+                if rate<1:raise RuntimeError('Established flow did not resume after outage')
+                server.wait(timeout=5)
+                report('three_second_blackhole',recovery_sec=recovery,flow_received_mbps=round(rate,3),process_restart=False)
+
+                # Restart one actual peer. The surviving process must authorize
+                # the new identity and resume without a manual restart.
+                old=processes[1];old.terminate();old.wait(timeout=5)
+                processes[1]=subprocess.Popen(['ip','netns','exec',names[1],str(ROOT/'dist/ggstunnel-linux-amd64'),
+                                              '-c',str(tmp/'1.json')],stdout=logs[1],stderr=logs[1])
+                report('peer_restart',recovery_sec=reachable())
+
+                # Test intentional configuration for a smaller outer MTU.
+                # Automatic PMTU discovery is not claimed by this test.
+                for p in processes[:2]:p.terminate();p.wait(timeout=5)
+                for i,n in enumerate(names):
+                    run('ip','-n',n,'link','set',('ggs-ci-va','ggs-ci-vb')[i],'mtu','1200')
+                    path=tmp/f'{i}.json';cfg=json.loads(path.read_text())
+                    cfg['tun']['mtu']=1040;cfg['performance']['max_frame_payload']=1040
+                    path.write_text(json.dumps(cfg))
+                    processes[i]=subprocess.Popen(['ip','netns','exec',n,str(ROOT/'dist/ggstunnel-linux-amd64'),
+                                                   '-c',str(path)],stdout=logs[i],stderr=logs[i])
+                reachable()
+                run('ip','netns','exec',names[0],'ping','-c','3','-W','2','-M','do','-s','1012','10.77.1.2',timeout=10)
+                report('outer_mtu_1200',tun_mtu=1040,payload_bytes=1012)
             print(f'PASS: {profile}, real encrypted TUN, both directions, 80ms base RTT, 100Mbps netem link')
         finally:
             for p in processes:
