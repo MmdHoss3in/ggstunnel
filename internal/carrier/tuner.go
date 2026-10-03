@@ -138,6 +138,24 @@ func (t *bipTuner) onTimeout(now time.Time) {
 	t.cuts++
 }
 
+// A SACK hole with subsequent deliveries still has a working ACK clock.
+// Reduce capacity, but do not apply the same penalty and full-RTO pause as
+// a stalled delivery. Pacing and the per-flight loss guard remain active.
+func (t *bipTuner) onFastLoss(now time.Time) {
+	if !t.adaptive() || now.Before(t.recoveryUntil) {
+		return
+	}
+	t.threshold = math.Max(1, t.cwnd*0.8)
+	t.cwnd = t.threshold
+	t.credit = math.Min(t.credit, float64(t.burst()))
+	delay := t.srtt
+	if delay <= 0 {
+		delay = t.rto
+	}
+	t.recoveryUntil = now.Add(max(10*time.Millisecond, delay))
+	t.cuts++
+}
+
 // A path transition invalidates timing, not all learned capacity. Congestion
 // cuts remain the responsibility of loss recovery, avoiding a second cut to 16.
 func (t *bipTuner) pathChanged() {

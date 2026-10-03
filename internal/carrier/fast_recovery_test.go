@@ -54,3 +54,30 @@ func TestSACKFastRecoveryAcrossSequenceWrap(t *testing.T) {
 		t.Fatal("wrapped SACK hole did not recover")
 	}
 }
+
+func TestFastLossKeepsAckClockButStillReducesCapacity(t *testing.T) {
+	b := testBIP(t)
+	b.tuner = adaptiveTuner()
+	b.tuner.cwnd = 100
+	b.tuner.srtt = 80 * time.Millisecond
+	b.dataSeq = 200
+	now := time.Now()
+	b.noteDeliveryLoss(&pendingData{item: outData{seq: 100}, fast: true}, now)
+	if b.tuner.window() != 80 || b.tuner.cuts != 1 {
+		t.Fatal("fast loss must reduce capacity")
+	}
+	b.noteDeliveryLoss(&pendingData{item: outData{seq: 150}, fast: true}, now.Add(time.Second))
+	if b.tuner.cuts != 1 {
+		t.Fatal("fast loss cut the same transmitted flight twice")
+	}
+	b.tuner.onAck(100, 80*time.Millisecond, now.Add(90*time.Millisecond))
+	if b.tuner.window() <= 80 {
+		t.Fatal("working ACK clock paused for the full RTO")
+	}
+	b.dataSeq = 300
+	before := b.tuner.window()
+	b.noteDeliveryLoss(&pendingData{item: outData{seq: 250}}, now.Add(time.Second))
+	if b.tuner.window() > before/2+1 {
+		t.Fatal("delivery timeout lost its stronger congestion response")
+	}
+}

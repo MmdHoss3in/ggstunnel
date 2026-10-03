@@ -10,7 +10,11 @@ func (b *BIP) noteDeliveryLoss(p *pendingData, now time.Time) {
 		return
 	}
 	before := b.tuner.cuts
-	b.tuner.onTimeout(now)
+	if p.fast {
+		b.tuner.onFastLoss(now)
+	} else {
+		b.tuner.onTimeout(now)
+	}
 	if b.tuner.cuts != before {
 		b.lossFlightEnd = b.dataSeq
 		b.lossFlightSet = true
