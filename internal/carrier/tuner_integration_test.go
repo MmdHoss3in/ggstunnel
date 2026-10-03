@@ -6,11 +6,20 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"ggstunnel/internal/config"
 )
 
 func TestAdaptiveDelayedLinkAndPathTransition(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &simLink{adaptive: true, delay: 15 * time.Millisecond, copies: 1, dropFirst: true, requests: make(map[[3]uint16]time.Time)}
+	// Make silence suspension coincide with FAST expiry. A larger measured
+	// RTO can accidentally leave enough time to send compatibility DATA first,
+	// hiding the need for an authenticated liveness reply to NEED_PULL.
+	l.configure = func(c *config.Config) {
+		c.Tuner.MinRTOMS = 50
+		c.Tuner.MaxRTOMS = 50
+	}
 	defer func() { cancel(); l.schedulerWorkers.Wait() }()
 	var blocked atomic.Bool
 	l.filter = func(_ int, p []byte) bool {
@@ -42,7 +51,7 @@ func TestAdaptiveDelayedLinkAndPathTransition(t *testing.T) {
 			case err := <-a.Errors():
 				t.Fatal(err)
 			case <-deadline:
-				t.Fatal("adaptive transfer timed out")
+				t.Fatalf("%s transfer timed out: delivered=%d sender=%+v tuner=%+v receiver=%+v", label, len(seen), a.SnapshotStats(), a.SnapshotTuner(), b.SnapshotStats())
 			}
 		}
 		total += 60

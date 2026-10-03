@@ -28,6 +28,8 @@ jobs:
           go test -race -tags audit -short -count=1 -timeout 5m ./...
       - name: Measure owned frame buffers against previous copies
         run: go test ./internal/frame -run '^$' -bench 'BenchmarkCodecSealBuffers' -benchmem -benchtime 2s -count 3
+      - name: Repeat filtered-path transition with silence suspension
+        run: go test -race ./internal/carrier -run '^TestAdaptiveDelayedLinkAndPathTransition$' -count=50 -timeout 3m -v
       - name: Build and test every manager path
         run: |
           bash scripts/build-release.sh

@@ -890,6 +890,11 @@ func (b *BIP) handle(body []byte, now time.Time) {
 	case bipKindNeedPull:
 		b.needPullRx.Add(1)
 		b.remotePullUntil = now.Add(time.Duration(b.cfg.Transport.BIPPullHoldMS) * time.Millisecond)
+		// FAST and PULL probes may both be filtered while request DATA still
+		// works. Confirm this authenticated request so silence suspension does
+		// not prevent the first compatibility DATA from discovering that path.
+		// ACKs do not authorize a reset and never elicit another ACK.
+		_ = b.send(responseType(p), p.id, p.tuple, bipKindAck, 0, 0, nil, b.active)
 	case bipKindPullProbe:
 		b.pullProbeRx.Add(1)
 		b.lastPull = now

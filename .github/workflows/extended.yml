@@ -80,7 +80,7 @@ jobs:
         working-directory: release-source
         run: |
           mkdir -p ../boundary-results
-          go test -race -tags audit ./internal/carrier ./internal/frame ./internal/session ./internal/engine -run 'Wrap|Boundary|Expiry|Budget|Rotation|WorkerShutdown|WideSACK|PersistentRetransmission|PathReturn|TCPBatch|KeyLifetime|RecoveryUses|PathSilence|FairQueue|BIPDrains|FASTEventPump|CoalescesActor' -count=50 -timeout 6m -v | tee ../boundary-results/boundaries.log
+          go test -race -tags audit ./internal/carrier ./internal/frame ./internal/session ./internal/engine -run 'Wrap|Boundary|Expiry|Budget|Rotation|WorkerShutdown|WideSACK|PersistentRetransmission|PathReturn|TCPBatch|KeyLifetime|RecoveryUses|PathSilence|FairQueue|BIPDrains|FASTEventPump|CoalescesActor|AdaptiveDelayedLinkAndPathTransition|SealedBuffersRetain' -count=50 -timeout 6m -v | tee ../boundary-results/boundaries.log
       - name: Diagnostic live heap and goroutine cycles
         shell: bash
         run: |
