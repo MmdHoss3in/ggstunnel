@@ -38,7 +38,9 @@ const (
 	bipKindReady       byte = 10
 	bipFlagMore        byte = 1
 	bipFlagPulled      byte = 2
-	bipFlagWideSACK    byte = 4
+	// MORE is ignored on legacy PROOF packets. Its authenticated use there
+	// advertises wide SACK without introducing a flag old parsers reject.
+	bipFlagWideSACK    byte = bipFlagMore
 	bipLegacySpan           = 4096
 	bipWideSpan             = 8192
 	pendingModeFast    byte = 1
@@ -443,7 +445,7 @@ func (b *BIP) recordRXSeqLocked(seq uint32) bool {
 		w.dirty = true
 		return false
 	}
-	if sequenceDistance(w.max, seq) > uint32(b.window()) {
+	if sequenceDistance(w.max, seq) > uint32(b.ackSpan()) {
 		return false
 	}
 	w.seen[seq] = true
@@ -486,7 +488,7 @@ func (b *BIP) ackExtension(ack uint32) []byte {
 	high := 0
 	for seq := range b.rxAck.seen {
 		d := sequenceDistance(ack, seq)
-		if d > 64 && d <= uint32(b.window()) {
+		if d > 64 && d <= uint32(b.ackSpan()) {
 			i := (d-1)/64 - 1
 			words[i] |= uint64(1) << ((d - 1) % 64)
 			high = max(high, int(i)+1)
@@ -898,9 +900,11 @@ func (b *BIP) handle(body []byte, now time.Time) {
 }
 func (b *BIP) window() int {
 	n := b.cfg.Performance.QueueSize
-	span := bipLegacySpan
-	if b.peerSpan == bipWideSpan { span = bipWideSpan }
-	return min(n, span)
+	return min(n, b.ackSpan())
+}
+func (b *BIP) ackSpan() int {
+	if b.peerSpan == bipWideSpan { return bipWideSpan }
+	return bipLegacySpan
 }
 func (b *BIP) deliverOne(typ byte, id, tuple uint16, mode byte, now time.Time) {
 	b.ackMu.Lock()

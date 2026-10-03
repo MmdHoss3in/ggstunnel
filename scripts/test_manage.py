@@ -98,7 +98,7 @@ class ManagerTests(unittest.TestCase):
    p=subprocess.run(list(map(str,args)),text=True,capture_output=True,timeout=timeout)
    if p.returncode and check:raise RuntimeError(p.stderr)
    return p
-  with patch.object(m,'OPT',opt),patch.object(m,'UNITS',units),patch.object(m,'atomic',fake_atomic),patch.object(m,'run',execute),patch.object(m,'wait_service',lambda n:None):
+  with patch.object(m,'OPT',opt),patch.object(m,'UNITS',units),patch.object(m,'WRAPPER',self.root/'wrapper'),patch.object(m,'atomic',fake_atomic),patch.object(m,'run',execute),patch.object(m,'wait_service',lambda n:None):
    m.install(source);first=(opt/'current').resolve()
    first_unit=(units/'ggstunnel@.service').read_text()
    (source/'scripts/manage.py').write_text('# manager updated fixture');manifest()

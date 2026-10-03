@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 MODE="${1:-auto}"
 case "$MODE" in
-  menu|--menu) exec /usr/local/bin/ggstunnel ;;
+  menu|--menu) shift; exec /usr/local/bin/ggstunnel "$@" ;;
   auto)
     if [[ -x /usr/local/bin/ggstunnel ]]; then exec /usr/local/bin/ggstunnel; fi
     ;;

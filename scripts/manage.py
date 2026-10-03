@@ -26,6 +26,8 @@ ROOT = Path('/etc/ggstunnel')
 OPT = Path('/opt/ggstunnel')
 UNITS = Path('/etc/systemd/system')
 RUN = Path('/run/ggstunnel')
+WRAPPER = Path('/usr/local/bin/ggstunnel')
+SYSCTL_FILE = Path('/etc/sysctl.d/90-ggstunnel.conf')
 VERSION = (Path(__file__).resolve().parents[1]/'internal/version/VERSION').read_text().strip()
 PROFILES = ('bip', 'tcp', 'udp', 'icmp', 'gre')
 
@@ -72,6 +74,17 @@ def configs(ignore=None, strict=True):
                 raise ValueError('Configuration name does not match its file')
             for key in ('role', 'profile', 'real', 'tun', 'performance', 'transport'):
                 if key not in c: raise ValueError('Missing ' + key)
+            if c['role'] not in ('client', 'server') or c['profile'] not in PROFILES:
+                raise ValueError('Unknown role or transport')
+            for section, keys in {'tun': ('name','local_addr','remote_addr'),
+                                  'real': ('local_ip','peer_ip','listen_addr'),
+                                  'transport': ('l4_port',), 'performance': ()}.items():
+                if not isinstance(c[section], dict) or any(k not in c[section] for k in keys):
+                    raise ValueError('Incomplete ' + section + ' settings')
+            if not isinstance(c.get('forwards', []), list): raise ValueError('Invalid forward list')
+            for rule in c.get('forwards', []):
+                if not isinstance(rule, dict) or rule.get('protocol') not in ('tcp','udp') or not all(isinstance(rule.get(k),str) for k in ('listen','target')):
+                    raise ValueError('Invalid forwarding rule')
             result[p.stem] = c
         except (OSError, ValueError, TypeError, AttributeError) as error:
             if strict: raise ValueError('Invalid configuration ' + p.name + ': ' + str(error)) from error
@@ -158,7 +171,8 @@ def conflict(c, old_name=None):
         if c['tun']['name'] == name or c['tun']['local_addr'] == other['tun']['local_addr']:
             raise ValueError('Tunnel ID/address already allocated')
         if c['profile'] == other['profile']:
-            if c['profile'] in ('tcp', 'udp') and listeners_overlap(c['real']['listen_addr'], other['real']['listen_addr']):
+            listening = c['profile'] == 'udp' or (c['role'] == other['role'] == 'server')
+            if c['profile'] in ('tcp', 'udp') and listening and listeners_overlap(c['real']['listen_addr'], other['real']['listen_addr']):
                 raise ValueError('Transport port already allocated')
             if c['profile'] in ('bip','icmp','gre') and c['real']['peer_ip'] == other['real']['peer_ip']:
                 raise ValueError('One raw tunnel per transport and public peer IP')
@@ -258,8 +272,8 @@ def action(verb, name):
 def delete(name):
     path = confpath(name)
     if not path.exists(): raise ValueError('Unknown tunnel')
-    run(['systemctl','disable','--now',unit(name)])
     atomic(ROOT/'backups'/(name+'-deleted-'+str(time.time_ns())+'.json'),path.read_text())
+    run(['systemctl','disable','--now',unit(name)])
     path.unlink(); (RUN/(name+'.json')).unlink(missing_ok=True)
     run(['systemctl','reset-failed',unit(name)],check=False)
     print('Deleted tunnel; private config backup retained.')
@@ -285,11 +299,13 @@ def edit(name):
         c.setdefault('forwards',[]).append(dict(protocol=proto,listen=f'{host}:{port}',target=f"{c['tun']['remote_addr']}:{target}"))
         save_config(c,True)
     elif choice == '3':
+        if not c.get('forwards'): raise ValueError('No forwarding rules to remove')
         for i,r in enumerate(c.get('forwards',[]),1): print(i,r)
         i=integer(ask('Rule number'),1,len(c.get('forwards',[])))
         c['forwards'].pop(i-1);save_config(c,True)
     elif choice == '4':
         files=sorted((ROOT/'backups').glob(name+'-*.json'),key=lambda p:p.stat().st_mtime,reverse=True)
+        if not files: raise ValueError('No configuration backups available')
         for i,p in enumerate(files[:10],1): print(i,p.name)
         p=files[integer(ask('Backup number'),1,min(10,len(files)))-1]
         restored = json.loads(p.read_text())
@@ -308,7 +324,10 @@ def diagnose(name):
                 ['ip','-s','link','show',c['tun']['name']],['ip','route','get',c['tun']['remote_addr']],
                 ['ping','-I',c['tun']['name'],'-c','10','-W','2',c['tun']['remote_addr']],
                 ['journalctl','-u',unit(name),'-n','120','--no-pager']]:
-        p=run(cmd,check=False,timeout=40);chunks.append('$ '+' '.join(map(str,cmd))+'\n'+p.stdout+p.stderr)
+        try:
+            p=run(cmd,check=False,timeout=40);output=p.stdout+p.stderr
+        except (OSError, subprocess.TimeoutExpired) as error: output='Unavailable: '+str(error)
+        chunks.append('$ '+' '.join(map(str,cmd))+'\n'+output)
     stats=RUN/(name+'.json')
     if stats.exists():chunks.append(stats.read_text())
     atomic(path,'\n'.join(chunks));print('REPORT='+str(path))
@@ -372,22 +391,36 @@ def capacity(name, mode, rates=(5,20,50,80,100), duration=30):
     print('REPORT='+str(path))
 
 def tune(restore=False):
-    file=Path('/etc/sysctl.d/90-ggstunnel.conf');backup=ROOT/'network-before.json'
+    file=SYSCTL_FILE;backup=ROOT/'network-before.json'
     values={'net.core.rmem_max':16777216,'net.core.wmem_max':16777216,'net.ipv4.tcp_mtu_probing':1}
     if restore:
         if not backup.exists():raise ValueError('No saved tuning state')
         saved=json.loads(backup.read_text())
         for k,v in saved['before'].items():
             if run(['sysctl','-n',k]).stdout.strip()==str(saved['applied'][k]):run(['sysctl','-w',f'{k}={v}'])
-        file.unlink(missing_ok=True);backup.unlink();print('Restored unchanged settings; externally changed values preserved');return
+        if file.exists() and file.read_text() == saved.get('file_applied'):
+            if saved.get('file_before') is None: file.unlink()
+            else: atomic(file,saved['file_before'],saved.get('file_mode',0o644))
+        elif file.exists(): print('Tuning file was changed externally; preserving it')
+        backup.unlink();print('Restored unchanged settings; externally changed values preserved');return
     if backup.exists():
-        saved=json.loads(backup.read_text());values=saved['applied']
+        print('Tuning already recorded; restore it before applying again');return
     else:
         before={k:run(['sysctl','-n',k]).stdout.strip() for k in values}
         values={k:max(v,int(before[k])) for k,v in values.items()}
-        atomic(backup,json.dumps(dict(before=before,applied=values)))
-    atomic(file,'# ggstunnel socket ceilings and TCP MTU probing\n'+'\n'.join(f'{k} = {v}' for k,v in values.items())+'\n',0o644)
-    run(['sysctl','-p',file]);print('Tuning applied; existing larger values preserved')
+        content='# ggstunnel socket ceilings and TCP MTU probing\n'+'\n'.join(f'{k} = {v}' for k,v in values.items())+'\n'
+        saved=dict(before=before,applied=values,file_applied=content,
+                   file_before=file.read_text() if file.exists() else None,
+                   file_mode=(file.stat().st_mode & 0o777) if file.exists() else 0o644)
+        atomic(backup,json.dumps(saved))
+    try:
+        atomic(file,content,0o644)
+        run(['sysctl','-p',file])
+    except Exception:
+        # Keep the saved state until every rollback operation succeeds.
+        tune(True)
+        raise
+    print('Tuning applied; existing larger values preserved')
 
 UNIT = '''[Unit]
 Description=ggstunnel %i
@@ -422,14 +455,14 @@ def restore_unit(path, content):
     if content is None:path.unlink(missing_ok=True)
     else:atomic(path,content,0o644)
 
-def install(source):
-    source=Path(source).resolve();a=arch()
+def verify_package(source, a):
+    source=Path(source).resolve()
     # Verify the complete package before executing its binary or changing files.
     manifest=source/'SHA256SUMS'
     listed=set()
     for line in manifest.read_text().splitlines():
         digest,rel=line.split();rel=rel.lstrip('*');p=source/rel
-        if not re.fullmatch('[0-9a-f]{64}',digest) or not p.resolve().is_relative_to(source) or p.is_symlink():raise ValueError('Unsafe release manifest')
+        if not re.fullmatch('[0-9a-f]{64}',digest) or Path(rel).is_absolute() or '..' in Path(rel).parts or not p.resolve().is_relative_to(source) or p.is_symlink() or any(x.is_symlink() for x in p.parents if x != source and source in x.parents):raise ValueError('Unsafe release manifest')
         if rel in listed:raise ValueError('Duplicate release path')
         listed.add(rel)
         if hashlib.sha256(p.read_bytes()).hexdigest()!=digest:raise ValueError('Release checksum mismatch: '+rel)
@@ -440,17 +473,36 @@ def install(source):
         digest,n=line.split();expected[n.lstrip('*')]=digest
     exe=source/'dist'/('ggstunnel-linux-'+a)
     if hashlib.sha256(exe.read_bytes()).hexdigest()!=expected.get(exe.name):raise ValueError('Binary checksum mismatch')
+    return listed, exe
+
+def install(source):
+    source=Path(source).resolve();a=arch()
+    listed,exe=verify_package(source,a);manifest=source/'SHA256SUMS'
     os.chmod(exe,0o755)
     for c in configs().values():validate(c,exe)
     release_version=run([exe,'-version']).stdout.strip().split()[-1]
     if not re.fullmatch(r'[A-Za-z0-9.-]+',release_version):raise ValueError('Invalid release version')
+    if (source/'internal/version/VERSION').read_text().strip()!=release_version: raise ValueError('Manager/binary version mismatch')
     release=OPT/'releases'/(release_version+'-'+hashlib.sha256(manifest.read_bytes()).hexdigest()[:12])
     release.parent.mkdir(parents=True,exist_ok=True)
-    if not release.exists():shutil.copytree(source,release,ignore=shutil.ignore_patterns('develop-state','__pycache__','.git'))
+    if not release.exists():
+        stage=Path(tempfile.mkdtemp(dir=release.parent,prefix='.ggs-release-'))
+        try:
+            # Only authenticated manifest entries become installed executable code.
+            for rel in listed | {'SHA256SUMS'}:
+                dest=stage/rel;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source/rel,dest)
+            verify_package(stage,a);os.replace(stage,release)
+        finally:
+            if stage.exists():shutil.rmtree(stage)
+    else:
+        verify_package(release,a)
+        if (release/'SHA256SUMS').read_bytes()!=manifest.read_bytes(): raise ValueError('Cached release manifest changed')
     previous=(OPT/'current').resolve() if (OPT/'current').exists() else None
     running=[n for n in configs() if active(n)]
     unit_path=UNITS/'ggstunnel@.service'
     old_unit=unit_path.read_text() if unit_path.exists() else None
+    old_wrapper=WRAPPER.read_text() if WRAPPER.exists() else None
+    old_wrapper_mode=(WRAPPER.stat().st_mode & 0o777) if WRAPPER.exists() else 0o755
     new_unit=UNIT.replace('BINARY',exe.name)
     # Keep the previous installed unit for an upgrade from older packages
     # which did not save this generated release metadata.
@@ -460,13 +512,15 @@ def install(source):
     try:
         atomic(unit_path,new_unit,0o644)
         symlink(release,OPT/'current')
-        atomic('/usr/local/bin/ggstunnel', '#!/bin/sh\nexec python3 /opt/ggstunnel/current/scripts/manage.py "$@"\n',0o755)
+        atomic(WRAPPER, '#!/bin/sh\nexec python3 /opt/ggstunnel/current/scripts/manage.py "$@"\n',0o755)
         run(['systemctl','daemon-reload'])
         for n in running:action('restart',n)
     except Exception:
         if previous:symlink(previous,OPT/'current')
         else:(OPT/'current').unlink(missing_ok=True)
         restore_unit(unit_path,old_unit)
+        if old_wrapper is None: WRAPPER.unlink(missing_ok=True)
+        else: atomic(WRAPPER,old_wrapper,old_wrapper_mode)
         run(['systemctl','daemon-reload'],check=False)
         if previous:
             for n in running:run(['systemctl','restart',unit(n)],check=False)

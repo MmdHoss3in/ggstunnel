@@ -29,6 +29,7 @@ func TestWideSACKNegotiationAndLegacyFallback(t *testing.T) {
 func TestWideSACKHighestSlotAndBoundedHorizon(t *testing.T) {
     b := spanSender(t, 0)
     b.peerSpan = bipWideSpan
+    b.rxAck.seen = make(map[uint32]bool)
     b.rxAck.seen[8192] = true
     extra := b.ackExtension(0)
     if len(extra)!=1016 || binary.BigEndian.Uint64(extra[1008:]) != 1<<63 { t.Fatal("8192nd slot missing") }

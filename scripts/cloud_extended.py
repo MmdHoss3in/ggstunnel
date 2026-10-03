@@ -15,7 +15,7 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / 'release-source'
+SOURCE = Path(os.environ.get('GGS_SOURCE', ROOT / 'release-source' if (ROOT / 'release-source').exists() else ROOT))
 ARCH = {'x86_64': 'amd64', 'aarch64': 'arm64'}[platform.machine()]
 BIN = SOURCE / 'dist' / ('ggstunnel-linux-' + ARCH)
 OUT = ROOT / 'extended-results'
@@ -56,6 +56,8 @@ class Pair:
     def __init__(self, profile='bip', supervised=False):
         self.profile = profile; self.supervised = supervised
         self.names = ['gx-a', 'gx-b']; self.devs = ['gx-va', 'gx-vb']
+        self.router = 'gx-r'; self.router_devs = ['gx-ra', 'gx-rb']
+        self.outer = ['192.0.2.1', '198.51.100.1']
         self.p = [None, None]; self.units = ['ggs-cloud-a', 'ggs-cloud-b']
         self.children = []; self.created = []; self.logs = []
         self.tmp = tempfile.TemporaryDirectory(); self.path = Path(self.tmp.name)
@@ -63,20 +65,28 @@ class Pair:
 
     def __enter__(self):
         try:
-            for name in self.names:
+            for name in [*self.names, self.router]:
                 run('ip', 'netns', 'add', name); self.created.append(name)
-            run('ip', 'link', 'add', self.devs[0], 'type', 'veth', 'peer', 'name', self.devs[1])
+            run('ip', 'netns', 'exec', self.router, 'sysctl', '-qw', 'net.ipv4.ip_forward=1')
             key = os.urandom(32).hex()
             for i, name in enumerate(self.names):
+                gateway = '192.0.2.254' if i == 0 else '198.51.100.254'
+                run('ip', 'link', 'add', self.devs[i], 'type', 'veth', 'peer', 'name', self.router_devs[i])
                 run('ip', 'link', 'set', self.devs[i], 'netns', name)
-                run('ip', '-n', name, 'addr', 'add', f'192.0.2.{i+1}/24', 'dev', self.devs[i])
+                run('ip', 'link', 'set', self.router_devs[i], 'netns', self.router)
+                run('ip', '-n', name, 'addr', 'add', self.outer[i] + '/24', 'dev', self.devs[i])
+                run('ip', '-n', self.router, 'addr', 'add', gateway + '/24', 'dev', self.router_devs[i])
                 run('ip', '-n', name, 'link', 'set', self.devs[i], 'up')
+                run('ip', '-n', self.router, 'link', 'set', self.router_devs[i], 'up')
+                run('ip', '-n', name, 'route', 'add', 'default', 'via', gateway)
+                run('ip', 'netns', 'exec', name, 'ethtool', '-K', self.devs[i], 'tso', 'off', 'gso', 'off', 'gro', 'off')
+                run('ip', 'netns', 'exec', self.router, 'ethtool', '-K', self.router_devs[i], 'tso', 'off', 'gso', 'off', 'gro', 'off')
                 run('ip', '-n', name, 'link', 'set', 'lo', 'up')
                 cfg = json.loads((SOURCE / 'examples' / ('server.json' if i == 0 else 'client.json')).read_text())
                 cfg['profile'] = profile = self.profile; cfg['psk'] = key
                 cfg['tuner']['mode'] = 'adaptive' if profile == 'bip' else 'manual'
-                cfg['real'].update(local_ip=f'192.0.2.{i+1}', peer_ip=f'192.0.2.{2-i}',
-                                   listen_addr=f'192.0.2.{i+1}:24443', peer_addr=f'192.0.2.{2-i}:24443')
+                cfg['real'].update(local_ip=self.outer[i], peer_ip=self.outer[1-i],
+                                   listen_addr=self.outer[i] + ':24443', peer_addr=self.outer[1-i] + ':24443')
                 cfg['tun'].update(name='gx0', local_addr=f'10.77.1.{i+1}', remote_addr=f'10.77.1.{2-i}')
                 cfg['telemetry'].update(interval_sec=1, stats_file=str(self.path / f'stats-{i}.json'))
                 (self.path / f'{i}.json').write_text(json.dumps(cfg)); (self.path / f'{i}.json').chmod(0o600)
@@ -89,10 +99,12 @@ class Pair:
     def shape(self, rate=None, rtt=None, loss='0%', extra=(), asymmetric=False):
         if rate is not None: self.rate = rate
         if rtt is not None: self.rtt = rtt
+        self.queue_limit = max(256, min(20000, math.ceil(self.rate * 1e6 * self.rtt / 1000 / 8 / 1400)))
         for i, name in enumerate(self.names):
             applied = '3%' if asymmetric and i == 1 else loss
-            run('ip', 'netns', 'exec', name, 'tc', 'qdisc', 'replace', 'dev', self.devs[i], 'root',
-                'netem', 'limit', '20000', 'delay', f'{self.rtt / 2:g}ms', 'loss', applied,
+            # Router egress is the receiver's incoming path, outside sender TSQ.
+            run('ip', 'netns', 'exec', self.router, 'tc', 'qdisc', 'replace', 'dev', self.router_devs[1-i], 'root',
+                'netem', 'limit', str(self.queue_limit), 'delay', f'{self.rtt / 2:g}ms', 'loss', applied,
                 'rate', f'{self.rate}mbit', *extra)
 
     def pid(self, i):
@@ -219,7 +231,7 @@ def performance(profile):
             for rtt in (20, 80, 200):
                 pair.shape(rate, rtt)
                 for reverse in (False, True):
-                    base = pair.finish_iperf(*pair.iperf('192.0.2.2', 10, 2, reverse), 30)
+                    base = pair.finish_iperf(*pair.iperf(pair.outer[1], 10, 2, reverse), 30)
                     record(dict(kind='baseline', profile=profile, rate_mbps=rate, rtt_ms=rtt, reverse=reverse, **base))
                     for repeat in range(3):
                         row = dict(kind='performance', profile=profile, rate_mbps=rate, rtt_ms=rtt,
@@ -276,8 +288,11 @@ def recovery_trial(pair, trial, scenario='blackhole3', duration=60):
         resumed = [t - restored for t in data['completions'] if t >= restored]
         if not resumed: raise RuntimeError('Established integrity flow did not resume after fault')
         row.update(flow_recovery_sec=round(min(resumed), 3), verified_frames=data['verified_frames'], max_gap_sec=round(data['max_gap_sec'], 3))
+        post = [t for t in data['completions'] if t >= restored]
+        row['post_fault_max_gap_sec'] = round(max((b-a for a,b in zip(post, post[1:])), default=0), 3)
         row.update(pair.finish_iperf(server, bulk, 30))
         if row['flow_recovery_sec'] > 15: raise RuntimeError('Existing TCP flow exceeded 15s recovery target')
+        if len(post) < 3 or row['post_fault_max_gap_sec'] > 15: raise RuntimeError('Post-fault flow stalled or had insufficient verified progress')
         if row['received_mbps'] < 1: raise RuntimeError('Bulk transfer fell below connectivity floor')
         row['status'] = 'pass'
         stop(echo)
@@ -373,7 +388,8 @@ def main():
     args = parser.parse_args()
     (OUT / 'environment.json').write_text(json.dumps(dict(binary_sha256=run('sha256sum', BIN).stdout.split()[0],
         source_commit=run('git', '-C', SOURCE, 'rev-parse', 'HEAD').stdout.strip(), architecture=ARCH,
-        cpus=len(os.sched_getaffinity(0)), kernel=platform.release(), mode=args.mode)))
+        cpus=len(os.sched_getaffinity(0)), kernel=platform.release(), mode=args.mode,
+        topology='three namespaces, netem on routed receiver path, TSO/GSO/GRO disabled', queue_policy='one full RTT BDP, minimum 256 packets')))
     failures = {'performance': lambda: performance(args.profile), 'recovery': lambda: recoveries(args.shard),
                 'impairments': impairments, 'resources': resources, 'lifecycle': lifecycle}[args.mode]()
     if failures: raise SystemExit(f'{failures} failed/target-missed cases; all recorded observations retained')
