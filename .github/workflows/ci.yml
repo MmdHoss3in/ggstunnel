@@ -1,0 +1,73 @@
+name: Linux validation and release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Format and static checks
+        run: |
+          gofmt -w cmd internal
+          git diff --binary > /tmp/ggstunnel-format.patch
+          go vet ./...
+          bash -n setup.sh install.sh scripts/build-release.sh
+      - name: Race and audit tests
+        run: go test -race -tags audit -short -count=1 -timeout 5m ./...
+      - name: Build release binaries
+        run: bash scripts/build-release.sh
+      - name: Manager and installer tests
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Privileged kernel and raw socket tests
+        run: |
+          go test -c -o /tmp/ggs-carrier.test ./internal/carrier
+          go test -c -o /tmp/ggs-tun.test ./internal/tun
+          sudo /tmp/ggs-carrier.test -test.run '^TestBIPRawLoopback$' -test.v
+          sudo env GGS_KERNEL_TEST=1 /tmp/ggs-tun.test -test.run '^TestKernelTUNReadCancellation$' -test.v
+      - name: Sustained and concurrent simulated links
+        run: go test ./internal/carrier -run 'TestBIP5SustainedSimulation|TestNineBIP5Peers' -count=1 -timeout 4m -v
+      - name: Real TUN throughput under delay and loss
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3
+          sudo python3 scripts/test_netns.py
+      - name: Package verified source and binaries
+        run: |
+          bash scripts/build-release.sh
+          mkdir -p artifacts
+          cp /tmp/ggstunnel-format.patch artifacts/format.patch
+          tar --exclude='./.git' --exclude='./.github' --exclude='./artifacts' --exclude='__pycache__' --transform='s,^\.,ggstunnel,' -czf artifacts/ggstunnel-linux.tar.gz .
+          cd artifacts
+          sha256sum ggstunnel-linux.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ggstunnel-linux
+          path: artifacts/
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ggstunnel-linux
+          path: artifacts
+      - name: Publish tested prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS --verify-tag --prerelease --title "ggstunnel $GITHUB_REF_NAME — BIP5 recovery and installer" --notes-file RELEASE_NOTES.md

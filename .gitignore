@@ -1,0 +1,7 @@
+/dist/
+/SHA256SUMS
+/artifacts/
+__pycache__/
+*.pyc
+develop-state/
+*.test

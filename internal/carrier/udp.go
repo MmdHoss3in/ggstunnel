@@ -1,0 +1,117 @@
+package carrier
+
+import (
+	"context"
+	"fmt"
+	"ggstunnel/internal/config"
+	"net"
+	"sync"
+	"time"
+)
+
+// UDP uses explicitly configured public endpoints. Unauthenticated datagrams
+// must never change the return destination. NAT endpoint roaming is not enabled.
+type UDP struct {
+	cfg       *config.Config
+	rx, tx    chan []byte
+	conn      *net.UDPConn
+	peer      *net.UDPAddr
+	closeOnce sync.Once
+	closeCh   chan struct{}
+	errors    chan error
+}
+
+func NewUDP(c *config.Config) *UDP {
+	return &UDP{cfg: c, rx: make(chan []byte, c.Performance.QueueSize), tx: make(chan []byte, c.Performance.QueueSize), closeCh: make(chan struct{}), errors: make(chan error, 1)}
+}
+func (u *UDP) Name() string         { return "udp" }
+func (u *UDP) Recv() <-chan []byte  { return u.rx }
+func (u *UDP) Errors() <-chan error { return u.errors }
+func (u *UDP) Send(b []byte) error  { return enqueue(u.tx, b) }
+func (u *UDP) Start(ctx context.Context) error {
+	p, err := net.ResolveUDPAddr("udp4", u.cfg.Real.PeerAddr)
+	if err != nil {
+		return err
+	}
+	if p.IP == nil || p.Port == 0 {
+		return fmt.Errorf("UDP requires fixed peer address and port")
+	}
+	local, err := net.ResolveUDPAddr("udp4", u.cfg.Real.ListenAddr)
+	if err != nil {
+		return err
+	}
+	c, err := net.ListenUDP("udp4", local)
+	if err != nil {
+		return err
+	}
+	u.conn = c
+	u.peer = p
+	c.SetReadBuffer(u.cfg.Transport.SockBuf)
+	c.SetWriteBuffer(u.cfg.Transport.SockBuf)
+	go u.readLoop(ctx)
+	go u.writeLoop(ctx)
+	go func() {
+		select {
+		case <-ctx.Done():
+			u.Close()
+		case <-u.closeCh:
+		}
+	}()
+	return nil
+}
+func (u *UDP) fail(err error) {
+	select {
+	case u.errors <- err:
+	default:
+	}
+}
+func (u *UDP) readLoop(ctx context.Context) {
+	buf := make([]byte, 65535)
+	for {
+		n, src, err := u.conn.ReadFromUDP(buf)
+		if err != nil {
+			select {
+			case <-u.closeCh:
+				return
+			default:
+				u.fail(err)
+				return
+			}
+		}
+		if !src.IP.Equal(u.peer.IP) || src.Port != u.peer.Port || n > u.cfg.Performance.MaxFramePayload+60 {
+			continue
+		}
+		b := append([]byte(nil), buf[:n]...)
+		select {
+		case u.rx <- b:
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
+}
+func (u *UDP) writeLoop(ctx context.Context) {
+	for {
+		select {
+		case b := <-u.tx:
+			u.conn.SetWriteDeadline(time.Now().Add(u.cfg.IdleTimeout()))
+			if _, err := u.conn.WriteToUDP(b, u.peer); err != nil {
+				u.fail(err)
+				return
+			}
+		case <-ctx.Done():
+			return
+		case <-u.closeCh:
+			return
+		}
+	}
+}
+func (u *UDP) Close() error {
+	u.closeOnce.Do(func() {
+		close(u.closeCh)
+		if u.conn != nil {
+			u.conn.Close()
+		}
+	})
+	return nil
+}

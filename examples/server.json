@@ -1,0 +1,62 @@
+{
+  "config_version": 1,
+  "mode": "tun",
+  "role": "server",
+  "profile": "bip",
+  "psk": "CHANGE-ME-AT-LEAST-16-CHARS",
+  "real": {
+    "local_ip": "198.51.100.10",
+    "peer_ip": "203.0.113.20",
+    "listen_addr": "0.0.0.0:443",
+    "peer_addr": "203.0.113.20:443",
+    "interface": ""
+  },
+  "tun": {
+    "name": "ggs0",
+    "local_addr": "10.77.1.1",
+    "remote_addr": "10.77.1.2",
+    "prefix": 30,
+    "mtu": 1280,
+    "tx_queue_len": 1000,
+    "routes": []
+  },
+  "transport": {
+    "l4_port": 443,
+    "heartbeat_sec": 10,
+    "idle_timeout_sec": 90,
+    "retry_interval_sec": 2,
+    "dial_timeout_sec": 10,
+    "sock_buf": 4194304,
+    "bip_probe_ms": 700,
+    "bip_redundancy": 1,
+    "bip_fast_probe_ms": 1000,
+    "bip_fast_ttl_ms": 3500,
+    "bip_need_pull_ms": 20,
+    "bip_pull_pps": 10000,
+    "bip_pull_burst": 128,
+    "bip_pull_hold_ms": 120,
+    "bip_pull_timeout_ms": 300,
+    "bip_ack_ms": 10,
+    "bip_rto_ms": 250,
+    "bip_max_retries": 8,
+    "icmp_type": 8,
+    "icmp_code": 0
+  },
+  "performance": {
+    "profile": "stable",
+    "queue_size": 4096,
+    "max_frame_payload": 1280
+  },
+  "log_level": "info",
+  "tuner": {
+    "mode": "adaptive",
+    "min_rto_ms": 50,
+    "max_rto_ms": 10000,
+    "max_pps": 10000,
+    "max_burst": 128,
+    "unlimited_rate": true
+  },
+  "telemetry": {
+    "interval_sec": 5
+  }
+}

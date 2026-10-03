@@ -1,0 +1,77 @@
+package carrier
+
+import (
+	"context"
+	"encoding/binary"
+	"testing"
+	"time"
+
+	"ggstunnel/internal/config"
+)
+
+func TestPendingHeapDeadlineOrderAndCleanup(t *testing.T) {
+	b := testBIP(t)
+	b.tuner = adaptiveTuner()
+	now := time.Now()
+	b.queuePending(outData{seq: 1, retries: 4}, pendingModeFast, now.Add(-100*time.Millisecond))
+	b.queuePending(outData{seq: 2}, pendingModeFast, now)
+	p, ok := b.takeTimedOut(now.Add(90*time.Millisecond), time.Second)
+	if !ok || p.item.seq != 2 { t.Fatal("retry heap did not select earliest deadline") }
+	b.processPeerAckAt(1, 0, now.Add(100*time.Millisecond))
+	if len(b.retryHeap) != 0 || len(b.pending) != 0 { t.Fatal("ACK left stale retry entries") }
+}
+
+func TestBIPSendContextBackpressureAndCancellation(t *testing.T) {
+	c := simConfig("server")
+	ca, err := NewBIP(c); if err != nil { t.Fatal(err) }; b := ca.(*BIP)
+	defer b.Close()
+	for i:=0; i<cap(b.tx); i++ { if err:=b.Send([]byte("full")); err!=nil { t.Fatal(err) } }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error,1)
+	go func(){done<-b.SendContext(ctx, []byte("kept"))}()
+	select { case err:=<-done: t.Fatalf("full queue did not wait: %v",err); case <-time.After(10*time.Millisecond): }
+	<-b.tx
+	select { case err:=<-done: if err!=nil {t.Fatal(err)}; case <-time.After(time.Second): t.Fatal("space did not unblock producer") }
+	go func(){done<-b.SendContext(ctx, []byte("cancelled"))}()
+	cancel()
+	select { case err:=<-done: if err!=context.Canceled { t.Fatal(err) }; case <-time.After(time.Second): t.Fatal("cancellation stuck") }
+	go func(){done<-b.SendContext(context.Background(), []byte("closed"))}()
+	b.Close()
+	select { case err:=<-done: if err==nil { t.Fatal("closed carrier accepted blocked send") }; case <-time.After(time.Second): t.Fatal("close stuck") }
+}
+
+func TestACKBatchRetainsReplyTuple(t *testing.T) {
+	b:=testBIP(t); b.active=8
+	var packets [][]byte
+	b.emit=func(p []byte) error { packets=append(packets,append([]byte(nil),p...)); return nil }
+	now:=time.Now()
+	for i:=1;i<=16;i++ { b.scheduleAck(wirePacket{typ:8,id:5,tuple:uint16(i)},now,false) }
+	if len(packets)!=1 || packets[0][20]!=0 || binary.BigEndian.Uint16(packets[0][26:28])!=16 { t.Fatal("ACK batch lost stateful reply tuple") }
+	b.scheduleAck(wirePacket{typ:8,id:5,tuple:17},now,false)
+	if b.ackDue.IsZero() {t.Fatal("short batch has no deadline")}
+	b.flushAck(now.Add(10*time.Millisecond))
+	if len(packets)!=2 || !b.ackDue.IsZero() { t.Fatal("short batch was not flushed") }
+}
+
+// Exercise repeated loss after ramp-up; a DATA timeout must not invalidate a
+// working FAST probe or erase the learned congestion window via pathChanged.
+func TestFastPathSurvivesDataLoss(t *testing.T) {
+	ctx,cancel:=context.WithCancel(context.Background()); defer cancel()
+	l:=&simLink{adaptive:true,delay:10*time.Millisecond,copies:1,requests:make(map[[3]uint16]time.Time)}
+	defer func(){cancel();l.schedulerWorkers.Wait()}()
+	l.configure=func(c *config.Config){c.Tuner.UnlimitedRate=true;c.Tuner.MaxBurst=128;c.Transport.BIPFastTTLMS=1000;c.Transport.BIPFastProbeMS=100;c.Transport.BIPRTOMS=100}
+	a:=l.start(t,0,ctx); b:=l.start(t,1,ctx)
+	waitFor(t,func()bool{return a.SnapshotStats().FastHealthy && a.SnapshotTuner().Resets>0})
+	before:=a.SnapshotStats().FastDemotions
+	dropped:=false
+	l.mu.Lock()
+	l.filter=func(from int,p []byte)bool{if from==0 && p[12]==bipKindData && !dropped {dropped=true;return false};return true}
+	l.mu.Unlock()
+	for i:=0;i<100;i++ { if err:=a.SendContext(ctx,[]byte{byte(i)});err!=nil {t.Fatal(err)} }
+	seen:=map[byte]bool{}
+	deadline:=time.After(5*time.Second)
+	for len(seen)<100 { select {case p:=<-b.Recv():if seen[p[0]]{t.Fatal("duplicate")};seen[p[0]]=true;case <-deadline:t.Fatal("loss recovery stalled")} }
+	waitFor(t,func()bool{return a.SnapshotStats().Pending==0})
+	if a.SnapshotStats().FastDemotions!=before {t.Fatal("DATA loss demoted a healthy FAST path")}
+	if a.SnapshotStats().Retransmits==0 {t.Fatal("test did not exercise loss")}
+}
