@@ -140,6 +140,9 @@ type BIP struct {
 	reflectionsSuppressed, hmacFail, dataDuplicate, payloadFrameRx                                   atomic.Uint64
 	malformedWire, unknownSession                                                                    atomic.Uint64
 	pendingExpired, pendingOverflow, retransmits, txErrors, fastPromotions, fastDemotions            atomic.Uint64
+
+	rxHold map[uint32][]byte
+	rxNext uint32
 }
 
 func NewBIP(c *config.Config) (Carrier, error) {
@@ -663,6 +666,8 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.ackDue = time.Time{}
 	b.ackCount = 0
 	b.rxAck = sackWindow{init: true, seen: make(map[uint32]bool)}
+	b.rxHold = nil
+	b.rxNext = 1
 	b.ackMu.Unlock()
 	b.active = id
 	b.sessionKey = key
@@ -850,11 +855,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 			w.dirty = true
 			b.dataDuplicate.Add(1)
 		} else if sequenceDistance(w.max, p.token) <= 4096 {
-			select {
-			case b.rx <- append([]byte(nil), p.payload...):
-				b.recordRXSeqLocked(p.token)
-				b.payloadFrameRx.Add(1)
-			default:
+			if !b.receiveOrdered(p.token, p.payload) {
 				b.pendingOverflow.Add(1)
 			}
 		}
@@ -968,6 +969,7 @@ func (b *BIP) run(ctx context.Context) {
 				b.fastProbeTx.Add(1)
 			}
 			fast := now.Before(b.fastUntil)
+			b.drainRX()
 			if fast != b.fastHealthy.Swap(fast) {
 				if fast {
 					b.fastPromotions.Add(1)
