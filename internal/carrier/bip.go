@@ -84,6 +84,8 @@ type PacketIO interface {
 }
 
 type BIP struct {
+	lossFlightEnd uint32
+	lossFlightSet bool
 	retryHeap                                                                                        pendingHeap
 	closed                                                                                           chan struct{}
 	ackDue                                                                                           time.Time
@@ -606,6 +608,7 @@ func (b *BIP) retryOnPull(id, tuple uint16, now time.Time) bool {
 		return false
 	}
 	if b.tuner != nil {
+		b.noteDeliveryLoss(oldest, now)
 		b.tuner.allow(now, true)
 	}
 	oldest.item.retries++
@@ -655,6 +658,7 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.active = id
 	b.sessionKey = key
 	b.dataSeq = 0
+	b.lossFlightSet = false
 	b.txAckBase = 0
 	b.nextPullRetryCheck = time.Time{}
 	b.pullRate = 1000
@@ -1051,7 +1055,7 @@ func (b *BIP) run(ctx context.Context) {
 				}
 				if b.tuner != nil {
 					b.traceRecord(traceEvent{At: now, Event: "timeout", Seq: pd.item.seq, Mode: pd.mode, Retries: pd.item.retries, AgeMS: float64(now.Sub(pd.sent)) / float64(time.Millisecond), DeadlineMS: float64(now.Sub(pd.deadline)) / float64(time.Millisecond), RTOms: float64(b.tuner.rto) / float64(time.Millisecond), Window: b.tuner.window(), Cuts: b.tuner.cuts, Pending: len(b.pending), Backlog: len(b.tx)})
-					b.tuner.onTimeout(now)
+					b.noteDeliveryLoss(pd, now)
 					b.tuner.allow(now, true)
 				}
 				pd.item.retries++

@@ -1,5 +1,4 @@
-// Package session provides a bounded challenge gate for the next BIP wire
-// revision. It is not yet connected to the baseline BIP2 data plane.
+// Package session provides the bounded authenticated challenge gate used by BIP5.
 package session
 
 import (

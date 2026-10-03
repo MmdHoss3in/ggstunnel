@@ -41,6 +41,7 @@ def main():
                 cfg=json.loads((ROOT/'examples'/('server.json' if i==0 else 'client.json')).read_text())
                 cfg['psk']=key
                 cfg['profile']=profile
+                cfg['tuner']['mode']='adaptive' if profile=='bip' else 'manual'
                 cfg['real']['local_ip']=f'192.0.2.{i+1}'
                 cfg['real']['peer_ip']=f'192.0.2.{2-i}'
                 cfg['real']['listen_addr']=f'192.0.2.{i+1}:24443'

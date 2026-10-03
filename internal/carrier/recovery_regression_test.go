@@ -25,6 +25,24 @@ func TestPendingHeapDeadlineOrderAndCleanup(t *testing.T) {
 	}
 }
 
+func TestOneCongestionCutPerTransmittedFlight(t *testing.T) {
+	b := testBIP(t)
+	b.tuner = adaptiveTuner()
+	b.tuner.cwnd = 256
+	b.dataSeq = 300
+	now := time.Now()
+	b.noteDeliveryLoss(&pendingData{item: outData{seq: 100}}, now)
+	b.noteDeliveryLoss(&pendingData{item: outData{seq: 200}}, now.Add(time.Second))
+	if b.tuner.cuts != 1 || b.tuner.window() != 128 {
+		t.Fatal("one flight was penalized repeatedly")
+	}
+	b.dataSeq = 400
+	b.noteDeliveryLoss(&pendingData{item: outData{seq: 350}}, now.Add(2*time.Second))
+	if b.tuner.cuts != 2 || b.tuner.window() != 64 {
+		t.Fatal("new flight loss failed to reduce congestion window")
+	}
+}
+
 func TestPathTransitionPreservesSlowStartAndLossThreshold(t *testing.T) {
 	x:=adaptiveTuner()
 	threshold:=x.threshold

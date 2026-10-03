@@ -18,6 +18,10 @@ case "${1:-auto}" in
   *) echo 'Usage: setup.sh [menu|install|update|develop]'; exit 2 ;;
 esac
 [[ $EUID == 0 ]] || { echo 'Run with sudo/root'; exit 1; }
+[[ -f SHA256SUMS && -f dist/SHA256SUMS && -f scripts/manage.py ]] || {
+  echo 'This is a source checkout, not a built release. Run: sudo bash install.sh install'
+  exit 1
+}
 source /etc/os-release
 [[ "$ID" == ubuntu && "$VERSION_ID" =~ ^(22\.04|24\.04)$ ]] || { echo 'Supported: Ubuntu 22.04 / 24.04'; exit 1; }
 [[ -d /run/systemd/system ]] || { echo 'systemd must be running'; exit 1; }
