@@ -44,6 +44,17 @@ class RC5ManagerTests(unittest.TestCase):
   with patch.object(m,'ask',side_effect=['4','1']),patch.object(m,'save_config',save),contextlib.redirect_stdout(io.StringIO()) as out:m.edit('ggs01')
   token=next(x for x in out.getvalue().splitlines() if x.startswith('GGS2.'))
   self.assertEqual(m.decode_join(token)['psk'],old['psk'])
+ def test_forward_editor_add_remove_and_empty_errors(self):
+  self.save(self.cfg())
+  def save(c,replace):self.save(c)
+  with patch.object(m,'save_config',save),contextlib.redirect_stdout(io.StringIO()):
+   with patch.object(m,'ask',side_effect=['2','udp','0.0.0.0','5353','53']):m.edit('ggs01')
+   rule=m.configs()['ggs01']['forwards'][0]
+   self.assertEqual(rule,dict(protocol='udp',listen='0.0.0.0:5353',target='10.88.1.2:53'))
+   with patch.object(m,'ask',side_effect=['3','1']):m.edit('ggs01')
+   self.assertEqual(m.configs()['ggs01']['forwards'],[])
+   with patch.object(m,'ask',return_value='3'),self.assertRaisesRegex(ValueError,'No forwarding'):m.edit('ggs01')
+   with patch.object(m,'ask',return_value='4'),self.assertRaisesRegex(ValueError,'No configuration backups'):m.edit('ggs01')
  def test_tuning_transaction_and_external_changes(self):
   file=self.root/'sysctl.conf';file.write_text('# existing owner settings\n');file.chmod(0o640)
   values={'net.core.rmem_max':'212992','net.core.wmem_max':'212992','net.ipv4.tcp_mtu_probing':'0'}

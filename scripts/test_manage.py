@@ -115,6 +115,19 @@ class ManagerTests(unittest.TestCase):
    self.assertEqual((units/'ggstunnel@.service').read_text(),first_unit)
    (source/'scripts/manage.py').write_text('# tampered')
    with self.assertRaises(ValueError):m.install(source)
+   (source/'scripts/manage.py').write_text('# next fixture');manifest()
+   (source/'scripts/unlisted.py').write_text('raise RuntimeError("unlisted executable")')
+   def failed_reload(args,check=True,timeout=90):
+    if str(args[0])=='systemctl' and args[1]=='daemon-reload' and check:raise RuntimeError('injected first install failure')
+    return execute(args,check,timeout)
+   first_opt=self.root/'fresh-opt';first_wrapper=self.root/'fresh-wrapper'
+   with patch.object(m,'OPT',first_opt),patch.object(m,'UNITS',self.root/'fresh-units'),patch.object(m,'WRAPPER',first_wrapper),patch.object(m,'run',failed_reload):
+    with self.assertRaisesRegex(RuntimeError,'first install'):m.install(source)
+    self.assertFalse(first_wrapper.exists());self.assertFalse((first_opt/'current').is_symlink())
+    cached=next((first_opt/'releases').glob(m.VERSION+'-*'))
+    self.assertFalse((cached/'scripts/unlisted.py').exists())
+    (cached/'scripts/manage.py').write_text('# cache tampering')
+    with self.assertRaisesRegex(ValueError,'checksum mismatch'):m.install(source)
 
  def test_capacity_stops_above_failed_rate_and_excludes_psk(self):
   c=self.config();m.atomic(m.confpath('ggs01'),json.dumps(c));calls=[]

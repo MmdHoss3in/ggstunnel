@@ -1,25 +1,34 @@
-# v0.3.0-rc5 — short recovery validation and SACK loss recovery
+# v0.3.0-rc5 — authenticated wider window, bounded recovery and installer transactions
 
-This release candidate prepares for field stability testing. Multi-day tests on the real Iran/foreign path remain with the operator. The BIP5 wire format is retained; upgrade both peers.
+This is the final *planned* prerelease before 0.3.0 stable. Publication is gated on the complete exact-source cloud matrix. Multi-day testing under real Iran/foreign routing and Xray users remains with the operator; short synthetic checks do not prove long-term reliability.
 
-## Changes since rc3
+## Changes since rc4
 
-- Detect delivery holes from newly acknowledged SACK frames. Duplicate acknowledgements cannot manufacture loss evidence. A short reordering allowance precedes the paced retry.
-- Retain accepted BIP frames in a bounded receive reorder buffer and deliver them in sequence. Reserve room for the missing frame so a full future window cannot deadlock recovery. This avoids exposing outer reordering to inner TCP, but can delay other flows on the same BIP tunnel during loss.
-- Distinguish SACK recovery with an active ACK clock from a delivery timeout: reduce the window by 20% and pause growth for one measured RTT for fast loss; retain the stronger timeout response, pacing, bounded flight window and exponential retry backoff.
-- Expose fast_retransmits and reorder_buffered in JSON telemetry.
-- Restore the previous systemd unit on failed upgrade and explicit release rollback, alongside the previous executable and manager. Preserve stopped/enabled states and configuration.
-- Read the binary and manager version from one embedded version file; validate standalone bootstrap/documentation pins and tag consistency before publication.
-- Require native ARM64/Ubuntu 24.04 and amd64/Ubuntu 22.04 race/audit tests plus real systemd install, active upgrade, rollback, temporary stop and disable checks.
-- Measure each throughput sample with fresh tunnel processes and controller state, two seconds of warm-up, and eight measured seconds. Require at least 30Mbps in the clean 100Mbps/80ms synthetic case; lossy checks have a 1Mbps connectivity/regression floor, not a stable performance target.
-- Exercise BIP with 0%, 0.2% and 1% loss per direction, a three-second complete blackout during an established TCP transfer, peer restart, and a deliberately configured 1200-byte outer MTU.
+- Negotiate an 8192-frame BIP SACK horizon with an authenticated receiver-issued challenge/PROOF. Keep the 4096-frame legacy limit with rc4 or smaller queues. Default new configurations to queue_size=8192 and TUN tx_queue_len=256; preserve explicit existing configuration until menu option 21 is selected.
+- Recover lost retransmissions using guarded fresh authenticated SACK snapshots. Periodically repeat retained ACK state while a receive hole persists. Replays remain filtered; congestion control, pacing, reordering guards and bounded retry budgets remain active.
+- Expedite stale exponential retry deadlines after a freshly verified path return without resetting retry budgets. Recover exhausted BIP delivery/identity-rotation budgets inside the same process with a new codec, sender identity, session gate and reassembly state.
+- Rekey safely after the existing encryption key lifetime limit for every carrier. Never reset encryption sequence numbers under an existing key. Recovery recreates TUN/forward listeners: some application connections may need reconnecting. Unexpected kernel/configuration errors still fail for systemd supervision.
+- Batch already queued TCP frames into bounded writes without waiting for another frame; cap its transmit queue and preserve Linux TCP buffer autotuning.
+- Add window_limit_frames, internal_recoveries, goroutines and heap_alloc_bytes telemetry. These are additive schema fields; the heap value is a point-in-time allocation observation, not a leak proof.
+- Make installation transactional: install only checksum-listed files through staging, revalidate cached versions, check manager/binary version consistency, restore the command wrapper after first-install or upgrade failure, and retain the previous systemd unit with its executable.
+- Restore previous sysctl file contents/mode and unchanged live values; rollback partial tuning failure and preserve later external changes. Detect overlapping wildcard/transport/forward listeners. Make corrupt configuration visible, show the restored join code, handle empty editors and exit cleanly on EOF.
+- Test all 21 menu dispatches, functional forward edits/restore, partial tuning failure, checksum/cache tampering, failed first install, offline menu entry and actual install/upgrade/rollback/STOP/OFF on amd64 and arm64.
 
-## Validation and limits
+## Cloud release gate
 
-The release waits for formatting/vet, race/audit, parser/controller fuzzing, manager/offline-menu tests, real kernel TUN/raw sockets, concurrent FAST/PULL simulations, all five real encrypted carrier throughput checks, and both native platform jobs. Exact tagged-build measurements and short recovery results follow below and are attached as JSONL assets.
+The network harness uses two endpoint namespaces plus an intermediary router, receiver-path netem shaping outside sender TCP Small Queues, disabled TSO/GSO/GRO and a bounded BDP queue. Numbers from the earlier endpoint-egress rc4 experiment are not a like-for-like comparison.
 
-Short synthetic samples establish the exercised behavior only. Loss remains a material BIP performance limitation. Outer-MTU testing uses a 1040-byte TUN/payload configuration; automatic PMTU discovery is not implemented. Exhausted retries can still terminate a carrier and trigger systemd restart. Longer outages, real provider ICMP policing, multi-day resource behavior and real Xray load need field validation before a stable release.
+The gate requires vet, formatting/version consistency, race/audit, parser/controller fuzzing, real TUN/raw ICMP, concurrent simulations, native Ubuntu 22.04 amd64/Ubuntu 24.04 arm64 systemd checks and the complete extended matrix: 180 throughput observations across five carriers and 200/300Mbps with 20/80/200ms RTT, 60 short outage trials, 12 impairment scenarios including 10/30/60-second blackouts under the installed service hardening, 18 steady-loss samples, 2 mixed-version transfers, 30 lifecycle cycles and 15-minute resource probes on two architectures. Missing results and failed cases block publication. Complete systemd journals are not uploaded by these cloud experiments.
+
+Clean BIP samples require 100Mbps; other clean carriers require 30Mbps. Lossy samples have a 1Mbps connectivity/progress floor and a 15-second flow-stall bound, not a 100Mbps guarantee. Dynamic impairment averages include a clean period; separate steady-loss measurements apply loss before warm-up. Raw intervals and telemetry remain in Actions artifacts.
+
+## Remaining limits
+
+- Sustained loss, real provider ICMP policing, route changes, NAT behavior and multi-day real Xray load need field validation. Ordered BIP delivery can stall unrelated inner flows while a hole is recovered.
+- Automatic outer PMTU discovery is not implemented. For a smaller path, reduce both peers' TUN MTU and max_frame_payload together; the 1200-byte outer-MTU check explicitly uses 1040-byte TUN/payload.
+- The conditional confidence bound from the 60 short trials assumes independent trials from a fixed distribution. It is not a probability of multi-day survival or an assurance that no bug exists.
+- Larger queues/window limits cannot override bottleneck bandwidth, congestion, firewall rules or CPU/kernel constraints. Configured profile=stable is a tuning preset, not release certification.
 
 ## Install or update
 
-Use the pinned rc4 bootstrap in README.md on both peers. Alternatively download ggstunnel-linux.tar.gz and SHA256SUMS, verify with sha256sum -c SHA256SUMS, extract, and run sudo bash ggstunnel/setup.sh install. No Go toolchain is needed on the server. Later sudo ggstunnel opens the installed menu offline, without dependency checks.
+Use the pinned v0.3.0-rc5 bootstrap in README.md on both peers. Download ggstunnel-linux.tar.gz and SHA256SUMS, verify using sha256sum -c SHA256SUMS, extract and run sudo bash ggstunnel/setup.sh install. No Go toolchain is required on the server. Later sudo ggstunnel or setup.sh menu opens the installed menu offline, without dependency checks. For old BIP configurations, review and apply option 21 on both peers to enable the new window defaults.

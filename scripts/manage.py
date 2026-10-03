@@ -398,7 +398,8 @@ def tune(restore=False):
         saved=json.loads(backup.read_text())
         for k,v in saved['before'].items():
             if run(['sysctl','-n',k]).stdout.strip()==str(saved['applied'][k]):run(['sysctl','-w',f'{k}={v}'])
-        if file.exists() and file.read_text() == saved.get('file_applied'):
+        expected_file=saved.get('file_applied', '# ggstunnel socket ceilings and TCP MTU probing\n'+'\n'.join(f'{k} = {v}' for k,v in saved['applied'].items())+'\n')
+        if file.exists() and file.read_text() == expected_file:
             if saved.get('file_before') is None: file.unlink()
             else: atomic(file,saved['file_before'],saved.get('file_mode',0o644))
         elif file.exists(): print('Tuning file was changed externally; preserving it')

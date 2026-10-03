@@ -1,38 +1,40 @@
-# Validation and known limits
+# rc5 validation and known limits
 
-All builds and runtime tests run in GitHub Actions; no Go toolchain or test packages are installed on the user's workstation. See the workflow and the release for the exact commit and logs.
+All compilation and runtime tests run in GitHub Actions. No Go/Python toolchain or test packages are installed on the user's workstation. Local inspection and artifact hash verification do not execute the release binary.
 
-## Required rc4 release checks
+The exact tag's required jobs are defined in [.github/workflows/ci.yml](.github/workflows/ci.yml) and the reusable [extended matrix](.github/workflows/extended.yml). A prerelease is created only after all jobs succeed. The extended summary rejects missing observations, duplicate recovery trial numbers, boundary-package failures and recorded case failures. Development failures remain visible in Actions history.
 
-- Go formatting, vet, race detector, audit tests and short parser/controller fuzzing.
-- SACK evidence, duplicate/reordered ACK, sequence-wrap, bounded ordered receive and cancellation regressions.
-- Manager install/update/rollback, service-unit restoration and offline menu dispatch tests.
-- Privileged raw ICMP loopback and actual kernel TUN cancellation.
-- Sustained FAST/PULL simulation and nine concurrent simulated peers.
-- Actual amd64 binary, AES-GCM, TUN, raw sockets/kernel TCP and iperf3 across two Linux network namespaces for BIP/TCP/UDP/ICMP/GRE on Ubuntu 24.04.
-- Native race/audit and real systemd installation/lifecycle checks on Ubuntu 22.04/amd64 and Ubuntu 24.04/arm64. These do not measure ARM64 WAN throughput.
+## Required observations
 
-The release job depends on all jobs succeeding and validates the exact source tag. It publishes measured network-results.jsonl and recovery-results.jsonl beside the package and checksums. Throughput samples use a 100Mbps netem link, 80ms base RTT, fresh tunnel/controller state per direction/loss case, four TCP streams, two warm-up seconds and eight measured seconds. BIP tests 0%, 0.2% and 1% random loss per direction; other carriers currently test the clean link. The clean floor is 30Mbps; the lossy 1Mbps floor is only a connectivity/regression gate.
+| Experiment | Count / coverage | Criterion |
+|---|---|---|
+| Carrier performance | 180; 5 carriers, 200/300Mbps, 20/80/200ms RTT, both directions, 3 repeats | 30 measured seconds after 5 warm-up; BIP >=100Mbps; other carriers >=30Mbps |
+| Direct baselines | 60; same routed paths/directions | Receiver Mbps, retained for comparison |
+| BIP short outage | 60; 3-second blackout, 200Mbps/80ms | Existing hashed TCP flow resumes within 15s; >=3 post-fault completions, consecutive post-fault gaps <=15s; bulk >=1Mbps |
+| Dynamic impairments | 12; loss, burst, reorder, duplicate, asymmetry, 5Mbps rate, peer restart, 10/30/60s blackout | Same integrity/progress criteria; installed systemd unit for long-outage tests |
+| Steady loss | 18; 0.2/1/3% loss each direction, both directions, 3 repeats | Apply before warm-up; >=1Mbps, >=10 verified frames, largest measured completion gap <=15s |
+| Real rc4 compatibility | 2; old server/new client and new server/old client | Verified downloaded rc4 release, existing flow integrity, >=30Mbps clean 100Mbps path |
+| Resource load/idle | 90 cycles across amd64/arm64 | Fixed PIDs for 15min; 1/4/16 TCP streams, alternate direction, small UDP datagrams |
+| Resource integrity / summary | 2 integrity + 4 peer summaries | Hashed same socket; peak RSS <256MiB, late FD median <= early+8 |
+| Lifecycle | 30 | Fresh start/stop and verified payload |
+| Boundaries | 50 repetitions of selected Go tests under race/audit | Sequence wrap, expiry, retry budget, retirement/key lifetime, wide SACK and shutdown |
 
-Short real BIP recovery checks cover a three-second total blackout while a TCP flow is established, restart of one peer without restarting the survivor, and a 1200-byte outer MTU with a deliberately chosen 1040-byte TUN/payload. Native systemd tests cover installation, ON, upgrade while running, rollback, STOP with boot state preserved, and OFF.
+The 14-case shorter tagged binary test checks all carriers at 100Mbps/80ms and BIP at 0/0.2/1% loss, plus a three-second blackout, peer restart and manually configured outer MTU=1200. Native Ubuntu 22.04/amd64 and Ubuntu 24.04/arm64 tests install actual releases and exercise ON, active upgrade, unit/executable rollback, temporary STOP and OFF. All 21 menu dispatches and functional configuration/forward/installer/tuning regressions run separately; mocked dispatch coverage alone is not end-to-end coverage of every interactive input.
 
-## Verified rc3 baseline
+## Harness and interpretation
 
-[The rc3 release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.0-rc3) used sequential samples sharing controller state, without the rc4 warm-up/isolation procedure. Its exact tagged results were:
+Two endpoint namespaces route through a third namespace. netem acts on the intermediary router's egress toward the receiver, outside sender TSQ; TSO/GSO/GRO are disabled. Its packet queue is one full RTT bandwidth-delay product (minimum 256, maximum 20000 packets). This is a disposable Linux topology, not a reproduction of every public network. Complete systemd journals are not uploaded.
 
-| Carrier | Loss per direction | Forward Mbps | Reverse Mbps |
-|---|---:|---:|---:|
-| BIP5 | 0% | 72.995 | 73.786 |
-| BIP5 | 0.2% | 7.703 | 2.490 |
-| TCP | 0% | 78.601 | 82.836 |
-| UDP | 0% | 83.804 | 84.668 |
-| ICMP | 0% | 78.496 | 84.539 |
-| GRE | 0% | 82.635 | 83.491 |
+iperf values are useful receiver throughput. Raw interval JSON, warm-up omission markers, source/binary hashes, telemetry and /proc resource observations are retained in Actions artifacts. Injected-impairment averages contain a clean period and are not steady-loss speed. The separate loss matrix avoids that ambiguity. Empty/missing results cannot demonstrate passing behavior.
 
-Changes in test procedure and random loss mean single samples are not a statistically controlled before/after comparison. Carrier-only simulator speeds omit real sockets, TUN and inner encryption and are not end-to-end rates.
+For 60/60 successes, the exact one-sided 95% lower bound is 95.13% **only for the specified short experiment**, assuming independent trials and a fixed distribution. Seeds and multiple runners do not prove those assumptions. This is not a 95% prediction of multi-day uptime or a probability that the code has no bugs.
 
 ## Remaining field validation
 
-Loss still reduces useful BIP throughput and is not a solved performance problem. Ordered delivery can hold unrelated flows behind a missing frame. Custom congestion control, retry limits, bounded queues, and provider ICMP policing remain relevant. Automatic PMTU discovery is not implemented. Exhausting retry limits can stop the carrier; systemd's on-failure restart remains the recovery mechanism for that condition.
+The operator will test multi-day Iran/foreign traffic and real Xray users. Stable release approval requires those observations. Sustained loss remains a material BIP throughput constraint; ordered delivery can hold other inner flows behind a missing frame. ICMP policing, asymmetric congestion, NAT and provider routing changes can impose further limits. Automatic outer PMTU discovery is not implemented: coordinate both peers' smaller TUN/payload configuration when needed.
 
-The operator will perform multi-day real Iran/foreign WAN and connected-user/Xray tests. Short cloud checks do not establish multi-day uptime, resilience to every type or duration of outage, nine simultaneous real WAN peers, or a fixed throughput on a provider path. rc4 remains a release candidate until those observations support a stable release. Failed development runs remain in Actions history.
+rc5 handles exhausted BIP retry/identity budgets and safe data-key lifetime limits using fresh transport/codec identity in the same process. It recreates TUN and forwarding listeners; individual user connections may need reconnecting. Unexpected kernel/configuration failures still rely on systemd. Short RSS/heap/FD/goroutine observations screen for defects but cannot exclude slow leaks.
+
+## Historical evidence
+
+[The rc4 extended report](EXTENDED_VALIDATION.md) and [Persian report](EXTENDED_VALIDATION-fa.md) retain the earlier unchanged rc4 results and their limits. Their endpoint-egress topology and offload behavior differ from rc5; its TCP high-RTT numbers are not a controlled runtime comparison. Previous releases retain their own exact-build JSONL assets. Current results are appended to the rc5 GitHub Release with extended-report.md and extended-summary.json.
