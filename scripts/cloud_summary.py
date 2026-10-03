@@ -2,6 +2,7 @@
 import json
 import math
 from pathlib import Path
+import re
 import statistics
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,15 +31,32 @@ def main():
     unique = len({r['trial'] for r in trials}) == len(trials)
     summary = dict(recovery_trials=len(trials), recovery_successes=passed,
                    exact_one_sided_95_lower_bound=lower_bound(passed, len(trials)),
-                   planned_60_trials_complete=len(trials) == 60 and unique,
+                   planned_60_trials_complete=len(trials) == 60 and unique and {r['trial'] for r in trials} == set(range(60)),
                    scope='A 60-second synthetic BIP transfer with a three-second outage, 200Mbps link and 80ms RTT.',
                    independence_assumed_not_proven=True, multi_day_uptime_claim=False,
                    architecture_counts={arch: sum(r.get('architecture') == arch for r in rows) for arch in ('amd64', 'arm64')})
     failures = [r for r in rows if r.get('status') in ('fail', 'target_miss', 'resource_limit')]
     summary['failed_or_target_missed_cases'] = len(failures)
+    counts = {kind: sum(r.get('kind') == kind for r in rows) for kind in
+              ('baseline', 'performance', 'resource_cycle', 'resource_integrity', 'resource_summary', 'lifecycle')}
+    counts['impairments'] = sum(r.get('kind') == 'recovery' and r.get('scenario') != 'blackhole3' for r in rows)
+    summary['observation_counts'] = counts
+    expected = dict(baseline=60, performance=180, resource_cycle=90, resource_integrity=2,
+                    resource_summary=4, lifecycle=30, impairments=12)
+    summary['planned_observations_complete'] = all(counts[k] == n for k, n in expected.items()) and summary['planned_60_trials_complete']
+    boundary_files = list((ROOT / 'collected').rglob('boundaries.log'))
+    diagnostic_files = list((ROOT / 'collected').rglob('resources.log'))
+    boundary_logs = '\n'.join(p.read_text() for p in boundary_files)
+    diagnostic_logs = '\n'.join(p.read_text() for p in diagnostic_files)
+    expected_packages = ('carrier', 'frame', 'session', 'engine')
+    summary['boundary_packages_passed'] = all(re.search(r'^ok\s+ggstunnel/internal/' + package + r'\s', boundary_logs, re.M) for package in expected_packages)
+    summary['diagnostic_resource_test_passed'] = bool(re.search(r'^ok\s+ggstunnel/internal/carrier\s', diagnostic_logs, re.M))
+    summary['go_log_failure_detected'] = bool(re.search(r'(^FAIL\b|--- FAIL:|WARNING: DATA RACE|panic:)', boundary_logs + diagnostic_logs, re.M))
     text = '# rc4 extended short cloud validation\n\n'
     text += 'This report describes short synthetic tests of the unchanged rc4 runtime. It does not establish multi-day uptime or Iran/foreign WAN reliability. All failures and target misses are retained.\n\n'
-    text += f"Recovery trials: {passed}/{len(trials)} passed; 60 planned independent runs complete: {summary['planned_60_trials_complete']}.\n\n"
+    text += f"Planned observation counts complete: {summary['planned_observations_complete']}; counts: {json.dumps(counts)}. Missing observations do not count as passes.\n\n"
+    text += f"Go boundary packages passed: {summary['boundary_packages_passed']}; diagnostic resource test passed: {summary['diagnostic_resource_test_passed']}; Go log failure detected: {summary['go_log_failure_detected']}. Logs must be inspected alongside Actions job conclusions.\n\n"
+    text += f"Recovery trials: {passed}/{len(trials)} passed; 60 planned runs complete: {summary['planned_60_trials_complete']}.\n\n"
     if summary['planned_60_trials_complete']:
         text += f"Conditional exact one-sided 95% lower confidence bound: {100*summary['exact_one_sided_95_lower_bound']:.3f}% success for the specified short experiment, assuming independent trials and a fixed distribution. Seed changes and separate runners do not prove those assumptions. This is not a multi-day survival probability.\n\n"
     else: text += 'Incomplete planned sample: no 60-trial reliability demonstration is claimed.\n\n'
@@ -53,7 +71,8 @@ def main():
     text += '\n## Impairments and failures\n\n'
     for row in rows:
         if row.get('kind') == 'recovery' and row.get('scenario') != 'blackhole3':
-            text += f"- {row['scenario']}: {row['status']}; existing-flow recovery={row.get('flow_recovery_sec', 'unavailable')}s; {row.get('error', '')}\n"
+            text += f"- {row['scenario']}: {row['status']}; first existing-flow response after injection/restoration={row.get('flow_recovery_sec', 'unavailable')}s; longest response gap={row.get('max_gap_sec', 'unavailable')}s; supervisor restarts={row.get('supervisor_restarts', 'not supervised')}; {row.get('error', '')}\n"
+    text += '\nAn impairment pass means the specified connectivity/integrity criteria passed, not that throughput remained stable. Loss/reorder/asymmetry/rate-limit case averages include the clean period before injection and cannot be interpreted as steady impaired throughput. First response after injection does not bound subsequent stalls; inspect longest response gaps. The rate-limit case uses netem shaping on all outer traffic, not a protocol-specific ICMP policer.\n'
     for row in failures:
         text += '- ' + json.dumps(row, ensure_ascii=False) + '\n'
     text += '\n## Resource observations\n\n'

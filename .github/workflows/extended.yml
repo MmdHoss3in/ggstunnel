@@ -69,11 +69,13 @@ jobs:
           go-version: '1.26.x'
           cache: false
       - name: Repeat expiry, wrap, replay, rotation and shutdown boundaries
+        shell: bash
         working-directory: release-source
         run: |
           mkdir -p ../boundary-results
           go test -race -tags audit ./internal/carrier ./internal/frame ./internal/session ./internal/engine -run 'Wrap|Boundary|Expiry|Budget|Rotation|WorkerShutdown' -count=50 -timeout 6m -v | tee ../boundary-results/boundaries.log
       - name: Diagnostic live heap and goroutine cycles
+        shell: bash
         run: |
           cp scripts/resource_cycles_test.go.txt release-source/internal/carrier/cloud_resources_test.go
           cd release-source
