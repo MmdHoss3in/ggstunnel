@@ -100,6 +100,7 @@ type PacketIO interface {
 }
 
 type BIP struct {
+	txReady chan struct{}
 	lossFlightEnd                                                                                    uint32
 	lossFlightSet                                                                                    bool
 	retryHeap                                                                                        pendingHeap
@@ -194,6 +195,7 @@ func NewBIP(c *config.Config) (Carrier, error) {
 	}
 	b := &BIP{tuner: newBIPTuner(c), cfg: c, local: l, peer: p, localID: sid, master: master, gate: g, rawfd: -1, id: binary.BigEndian.Uint16(seed[8:]), tx: make(chan []byte, c.Performance.QueueSize), rx: make(chan []byte, c.Performance.QueueSize), incoming: make(chan []byte, c.Performance.QueueSize), errors: make(chan error, 1), pending: make(map[uint32]*pendingData), rxAck: sackWindow{init: true, seen: make(map[uint32]bool)}, replay: frame.NewReplayGuard(65536)}
 	b.closed = make(chan struct{})
+	b.txReady = make(chan struct{}, 1)
 	// The retransmission window and the unsent backlog serve different
 	// purposes. Keep a small unsent backlog waiting ahead of inner
 	// TCP control traffic even when the flight window can reach 8192.
@@ -225,6 +227,7 @@ func (b *BIP) Send(p []byte) error {
 	}
 	select {
 	case b.tx <- p:
+		b.notifyTX()
 		return nil
 	default:
 		return ErrQueueFull
@@ -246,6 +249,7 @@ func (b *BIP) SendContext(ctx context.Context, p []byte) error {
 	}
 	select {
 	case b.tx <- p:
+		b.notifyTX()
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -970,6 +974,22 @@ func (b *BIP) deliverOne(typ byte, id, tuple uint16, mode byte, now time.Time) {
 		b.compatDataTx.Add(1)
 	}
 }
+func (b *BIP) notifyTX() {
+	select { case b.txReady <- struct{}{}: default: }
+}
+
+// FAST reacts to producer and ACK events instead of waiting for a maintenance
+// tick. Work per event remains bounded; congestion, pacing and SACK horizon
+// checks remain in deliverOne. A finite backlog is not a packets-per-tick cap.
+func (b *BIP) pumpFast(now time.Time) {
+	if b.active == 0 || !now.Before(b.fastUntil) || b.pathUnresponsive(now) { return }
+	for i := 0; i < b.cfg.Tuner.MaxBurst && len(b.tx) > 0; i++ {
+		previous := b.dataSeq
+		id, s := b.nextTuple()
+		b.deliverOne(0, id, s, pendingModeFast, now)
+		if b.dataSeq == previous { break }
+	}
+}
 func (b *BIP) run(ctx context.Context) {
 	tick := time.NewTicker(time.Millisecond)
 	defer tick.Stop()
@@ -979,6 +999,9 @@ func (b *BIP) run(ctx context.Context) {
 			return
 		case p := <-b.incoming:
 			b.handle(p, time.Now())
+			b.pumpFast(time.Now())
+		case <-b.txReady:
+			b.pumpFast(time.Now())
 		case <-tick.C:
 			// A ticker timestamp can predate queued I/O by an entire scheduling
 			// pause. Deadlines must start at actual transmission time.

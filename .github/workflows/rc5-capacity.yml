@@ -1,0 +1,42 @@
+name: rc5 capacity and sustained load regression
+on:
+  push:
+    branches: [release/rc5]
+permissions:
+  contents: read
+jobs:
+  capacity:
+    if: contains(github.event.head_commit.message, '[capacity-probe]')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { mode: capacity, shard: 0, runner: ubuntu-24.04 }
+          - { mode: capacity, shard: 1, runner: ubuntu-24.04 }
+          - { mode: capacity, shard: 2, runner: ubuntu-24.04 }
+          - { mode: capacity, shard: 3, runner: ubuntu-24.04 }
+          - { mode: capacity-hold, shard: 0, runner: ubuntu-24.04 }
+          - { mode: capacity-hold, shard: 0, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Build and audit in cloud
+        run: |
+          gofmt -w cmd internal
+          go test -race -tags audit -short -count=1 -timeout 5m ./...
+          bash scripts/build-release.sh
+          python3 -m py_compile scripts/*.py
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool
+      - name: Exercise capacity without an artificial Mbps limit
+        run: sudo env GITHUB_ACTIONS=true python3 scripts/cloud_extended.py '${{ matrix.mode }}' --shard '${{ matrix.shard }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc5-capacity-${{ matrix.mode }}-${{ matrix.shard }}-${{ matrix.runner }}
+          path: extended-results/

@@ -167,8 +167,13 @@ class Pair:
                              stderr=subprocess.PIPE if pipes else subprocess.DEVNULL, text=True)
         self.children.append(p); return p
 
-    def iperf(self, address, seconds=30, warmup=5, reverse=False, streams=4, udp=False):
-        server = self.child(1, ['iperf3', '-s', '-1'], False); time.sleep(.2)
+    def iperf(self, address, seconds=30, warmup=5, reverse=False, streams=4, udp=False, capture_receiver=False):
+        server_args = ['iperf3', '-s', '-1']
+        report_path = OUT / ('iperf-server-'+str(time.time_ns())+'.json')
+        if capture_receiver: server_args += ['-J', '--logfile', str(report_path)]
+        server = self.child(1, server_args, False)
+        if capture_receiver: server.report_path = report_path
+        time.sleep(.2)
         args = ['iperf3', '-c', address, '-t', str(seconds), '-O', str(warmup), '-P', str(streams), '-J']
         if reverse: args += ['-R']
         if udp: args += ['-u', '-b', '20M', '-l', '256']
@@ -184,8 +189,12 @@ class Pair:
         result = data['end'].get('sum_received', data['end'].get('sum', {}))
         if 'bits_per_second' not in result: raise RuntimeError('Missing iperf receiver result')
         server.wait(timeout=5)
-        return dict(received_mbps=round(result['bits_per_second'] / 1e6, 3),
-                    lost_percent=result.get('lost_percent'), retransmits=data['end'].get('sum_sent', {}).get('retransmits'))
+        measured = dict(received_mbps=round(result['bits_per_second'] / 1e6, 3),
+                        lost_percent=result.get('lost_percent'), retransmits=data['end'].get('sum_sent', {}).get('retransmits'))
+        if hasattr(server, 'report_path'):
+            receiver=json.loads(server.report_path.read_text())
+            measured['receiver_intervals_mbps']=[i['sum']['bits_per_second']/1e6 for i in receiver['intervals'] if not i['sum'].get('omitted',False)]
+        return measured
 
     def probe_server(self):
         # Bind wildcard so peer TUN restart does not destroy the echo listener.
@@ -476,11 +485,71 @@ def compatibility():
     return failures
 
 
+def capacity(shard):
+    rate=(100,200,500,1000)[shard]
+    failures=0
+    with Pair() as pair:
+        for rtt in (20,80):
+            for reverse in (False,True):
+                pair.shape(rate,rtt)
+                s,c=pair.iperf(pair.outer[1],seconds=10,warmup=2,reverse=reverse,streams=8)
+                direct=pair.finish_iperf(s,c,30)['received_mbps']
+                record(dict(kind='capacity_baseline',rate_mbps=rate,rtt_ms=rtt,reverse=reverse,received_mbps=direct,status='pass'))
+                for repeat in range(2):
+                    row=dict(kind='capacity',rate_mbps=rate,rtt_ms=rtt,reverse=reverse,repeat=repeat,baseline_mbps=direct,profile='bip')
+                    try:
+                        pair.restart();echo=pair.probe_server();probe=pair.probe(25)
+                        s,c=pair.iperf('10.77.1.2',seconds=20,warmup=5,reverse=reverse,streams=8)
+                        row.update(pair.finish_iperf(s,c,40));data=pair.finish_probe(probe,40)
+                        row.update(verified_frames=data['verified_frames'],max_gap_sec=data['max_gap_sec'],end_snapshot=pair.sample())
+                        floor=min(200,.65*direct) if rate>=500 else .65*direct
+                        row['target_mbps']=floor
+                        if row['received_mbps']<floor or data['verified_frames']<20 or data['max_gap_sec']>5:raise RuntimeError('Capacity or concurrent integrity floor failed')
+                        row['status']='pass'
+                    except Exception as exc:row.update(status='fail',error=str(exc));failures+=1
+                    for child in pair.children:stop(child)
+                    pair.children=[];record(row)
+    return failures
+
+
+def capacity_hold():
+    row=dict(kind='capacity_hold',rate_mbps=500,rtt_ms=80,profile='bip',duration_sec=600)
+    with Pair(supervised=True) as pair:
+        pair.shape(500,80);pair.restart()
+        original=[pair.pid(i) for i in range(2)]
+        done,thread,samples=pair.watch()
+        try:
+            echo=pair.probe_server();probe=pair.probe(615)
+            s,c=pair.iperf('10.77.1.2',seconds=600,warmup=15,streams=8,capture_receiver=True)
+            measured=pair.finish_iperf(s,c,660)
+            rates=measured.pop('receiver_intervals_mbps')
+            row.update(measured)
+            data=pair.finish_probe(probe,40)
+            row.update(verified_frames=data['verified_frames'],max_gap_sec=data['max_gap_sec'])
+            if len(rates)<590:raise RuntimeError('Missing receiver interval evidence')
+            windows=[statistics.median(rates[i:i+60]) for i in range(0,len(rates)-59,60)]
+            row.update(receiver_intervals=len(rates),window_medians_mbps=windows,
+                       early_median_mbps=statistics.median(rates[:120]),late_median_mbps=statistics.median(rates[-120:]),
+                       same_processes=original==[pair.pid(i) for i in range(2)])
+            if not row['same_processes'] or min(windows)<200 or row['late_median_mbps']<.75*row['early_median_mbps']:raise RuntimeError('Sustained capacity/progress declined')
+            if data['verified_frames']<1000 or data['max_gap_sec']>5:raise RuntimeError('Concurrent flow lost useful progress')
+            row['status']='pass'
+        except Exception as exc:row.update(status='fail',error=str(exc))
+        finally:
+            done.set();thread.join()
+            (OUT/'capacity-hold-samples.json').write_text(json.dumps(samples))
+            valid=[p for sample in samples for p in sample['peers'] if 'rss_mib' in p]
+            row['max_rss_mib']=max((p['rss_mib'] for p in valid),default=0)
+            if row['max_rss_mib']>=256:row.update(status='resource_limit',error='RSS bound exceeded')
+            record(row)
+    return row['status']!='pass'
+
+
 def main():
     if os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true':
         raise RuntimeError('Only root on a disposable GitHub Actions runner')
     OUT.mkdir(exist_ok=True)
-    parser = argparse.ArgumentParser(); parser.add_argument('mode', choices=('performance', 'recovery', 'impairments', 'resources', 'lifecycle','steady-loss','compatibility','recovery-focus'))
+    parser = argparse.ArgumentParser(); parser.add_argument('mode', choices=('performance', 'recovery', 'impairments', 'resources', 'lifecycle','steady-loss','compatibility','recovery-focus','capacity','capacity-hold'))
     parser.add_argument('--profile', default='bip'); parser.add_argument('--shard', type=int, default=0)
     args = parser.parse_args()
     (OUT / 'environment.json').write_text(json.dumps(dict(binary_sha256=run('sha256sum', BIN).stdout.split()[0],
@@ -488,7 +557,7 @@ def main():
         cpus=len(os.sched_getaffinity(0)), kernel=platform.release(), mode=args.mode,
         topology='three namespaces, netem on routed receiver path, TSO/GSO/GRO disabled', queue_policy='one full RTT BDP, minimum 256 packets')))
     failures = {'performance': lambda: performance(args.profile), 'recovery': lambda: recoveries(args.shard),
-                'impairments': impairments, 'resources': resources, 'lifecycle': lifecycle,'steady-loss':steady_loss,'compatibility':compatibility,'recovery-focus':recovery_focus}[args.mode]()
+                'impairments': impairments, 'resources': resources, 'lifecycle': lifecycle,'steady-loss':steady_loss,'compatibility':compatibility,'recovery-focus':recovery_focus,'capacity':lambda:capacity(args.shard),'capacity-hold':capacity_hold}[args.mode]()
     if failures: raise SystemExit(f'{failures} failed/target-missed cases; all recorded observations retained')
 
 
