@@ -47,4 +47,10 @@ func TestAuditBIPDeadTimeoutBounds(t *testing.T) {
 			t.Fatalf("unsafe BIP dead timeout accepted: %d", value)
 		}
 	}
+	c.Transport.BIPDeadTimeoutSec = 0
+	c.Transport.BIPFastTTLMS = 120000
+	c.ApplyDefaults()
+	if c.Transport.BIPDeadTimeoutSec != 121 || c.Validate() != nil {
+		t.Fatal("legacy long probe TTL no longer loads safely")
+	}
 }

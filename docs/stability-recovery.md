@@ -35,3 +35,5 @@ Hard recovery recreates TUN and forwarding listeners, so existing application co
 6. Benchmark optional FEC/KCP separately with loss, reordering, bandwidth limits and ICMP policing. FEC adds wire traffic and can worsen policing; KCP/SMUX do not by themselves eliminate whole-session transport ordering. Use received useful throughput and latency as acceptance criteria.
 
 The old 0.3.0 clean-link and steady-loss measurements remain historical. No 95% claim for multi-day Iran/foreign operation, zero bugs, or guaranteed 100–200Mbps follows from the reference binaries or short regression suite.
+
+An omitted dead timeout is extended beyond an explicitly longer legacy FAST TTL so existing valid probe configurations still load. Explicit unsafe deadlines are rejected. Native manager package regressions now select the runner architecture instead of hard-coding amd64. The dedicated field-recovery PR runs focused checks; the full extended release gate remains enabled for release tags and main.

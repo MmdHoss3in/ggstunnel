@@ -1,4 +1,7 @@
 name: BIP field recovery regression
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 on:
   push:
     branches: [fix/bip-silent-recovery]

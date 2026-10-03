@@ -216,7 +216,7 @@ func (c *Config) ApplyDefaults() {
 		c.Transport.BIPMaxRetries = 8
 	}
 	if c.Transport.BIPDeadTimeoutSec == 0 {
-		c.Transport.BIPDeadTimeoutSec = 90
+		c.Transport.BIPDeadTimeoutSec = max(90, c.Transport.BIPFastTTLMS/1000+1)
 	}
 	if c.Transport.ICMPType == 0 {
 		c.Transport.ICMPType = 8
