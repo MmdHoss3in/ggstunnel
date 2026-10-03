@@ -5,7 +5,8 @@ This release candidate keeps the BIP5 wire format. Upgrade both peers to benefit
 ## Changes
 
 - Keep a probe-verified FAST path through individual data timeouts; retain congestion control without repeatedly discarding learned capacity on path changes.
-- Apply cancellable, bounded BIP backpressure to the real TUN reader instead of dropping frames on a full userspace send queue.
+- Bound congestion reductions to a transmitted flight, so staggered deadlines for the same loss episode cannot repeatedly halve the window. PULL-based loss recovery uses the same controller.
+- Apply cancellable, bounded BIP and TCP backpressure to the real TUN reader instead of dropping frames on a full userspace send queue.
 - Batch dedicated ACKs while preserving authenticated ICMP reply tuples and immediate duplicate acknowledgements.
 - Replace full pending-map timeout scans with an indexed deadline heap. Remove acknowledged entries immediately.
 - Use current time, rather than an aged ticker timestamp, for scheduling.

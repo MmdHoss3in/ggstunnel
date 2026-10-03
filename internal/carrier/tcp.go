@@ -32,6 +32,11 @@ func NewTCP(c *config.Config) *TCP {
 func (t *TCP) Name() string        { return "tcp" }
 func (t *TCP) Recv() <-chan []byte { return t.rx }
 func (t *TCP) Send(b []byte) error { return enqueue(t.tx, b) }
+
+func (t *TCP) SendContext(ctx context.Context, b []byte) error {
+	return enqueueContext(ctx, t.closeCh, t.tx, b)
+}
+
 func (t *TCP) Start(ctx context.Context) error {
 	if t.cfg.Role == "server" {
 		ln, err := net.Listen("tcp4", t.cfg.Real.ListenAddr)

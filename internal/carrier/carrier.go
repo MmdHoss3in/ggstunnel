@@ -86,3 +86,24 @@ func enqueue(ch chan []byte, b []byte) error {
 		return ErrQueueFull
 	}
 }
+
+// Reliable stream carriers can propagate pressure back to TUN instead of
+// inducing an unrelated loss in the inner TCP flow. The queue stays bounded.
+func enqueueContext(ctx context.Context, closed <-chan struct{}, ch chan []byte, b []byte) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-closed:
+		return errors.New("carrier closed")
+	default:
+	}
+	cp := append([]byte(nil), b...)
+	select {
+	case ch <- cp:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-closed:
+		return errors.New("carrier closed")
+	}
+}

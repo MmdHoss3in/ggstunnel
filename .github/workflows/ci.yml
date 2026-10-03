@@ -19,14 +19,9 @@ jobs:
           cache: false
       - name: Format and static checks
         run: |
-          gofmt -w cmd internal
-          git diff --binary > /tmp/ggstunnel-format.patch
+          test -z "$(gofmt -l cmd internal)"
           go vet ./...
           bash -n setup.sh install.sh scripts/build-release.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: source-format
-          path: /tmp/ggstunnel-format.patch
       - name: Race and audit tests
         run: go test -race -tags audit -short -count=1 -timeout 5m ./...
       - name: Fuzz authenticated wire parsers and tuner
@@ -58,7 +53,6 @@ jobs:
         run: |
           bash scripts/build-release.sh
           mkdir -p artifacts
-          cp /tmp/ggstunnel-format.patch artifacts/format.patch
           tar --exclude='./.git' --exclude='./.github' --exclude='./artifacts' --exclude='__pycache__' --transform='s,^\.,ggstunnel,' -czf artifacts/ggstunnel-linux.tar.gz .
           cd artifacts
           sha256sum ggstunnel-linux.tar.gz > SHA256SUMS
@@ -82,4 +76,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          test "$GITHUB_REF_NAME" = 'v0.3.0-rc2'
           gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS --verify-tag --prerelease --title "ggstunnel $GITHUB_REF_NAME — BIP5 recovery and installer" --notes-file RELEASE_NOTES.md

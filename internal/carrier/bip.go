@@ -84,8 +84,8 @@ type PacketIO interface {
 }
 
 type BIP struct {
-	lossFlightEnd uint32
-	lossFlightSet bool
+	lossFlightEnd                                                                                    uint32
+	lossFlightSet                                                                                    bool
 	retryHeap                                                                                        pendingHeap
 	closed                                                                                           chan struct{}
 	ackDue                                                                                           time.Time

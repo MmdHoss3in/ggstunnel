@@ -44,17 +44,23 @@ func TestOneCongestionCutPerTransmittedFlight(t *testing.T) {
 }
 
 func TestPathTransitionPreservesSlowStartAndLossThreshold(t *testing.T) {
-	x:=adaptiveTuner()
-	threshold:=x.threshold
+	x := adaptiveTuner()
+	threshold := x.threshold
 	x.pathChanged()
-	if x.threshold!=threshold { t.Fatal("healthy path change disabled slow start") }
-	now:=time.Now()
-	x.onAck(16,80*time.Millisecond,now)
-	if x.window()!=32 {t.Fatal("initial growth was throttled")}
+	if x.threshold != threshold {
+		t.Fatal("healthy path change disabled slow start")
+	}
+	now := time.Now()
+	x.onAck(16, 80*time.Millisecond, now)
+	if x.window() != 32 {
+		t.Fatal("initial growth was throttled")
+	}
 	x.onTimeout(now)
-	window,threshold:=x.window(),x.threshold
+	window, threshold := x.window(), x.threshold
 	x.pathChanged()
-	if x.window()!=window || x.threshold!=threshold {t.Fatal("path change erased congestion evidence")}
+	if x.window() != window || x.threshold != threshold {
+		t.Fatal("path change erased congestion evidence")
+	}
 }
 
 func TestBIPSendContextBackpressureAndCancellation(t *testing.T) {
@@ -132,14 +138,21 @@ func TestACKBatchRetainsReplyTuple(t *testing.T) {
 }
 
 func TestHealthyFastDoesNotPerpetuatePullPolling(t *testing.T) {
-	b:=testBIP(t);b.active=8;b.tx=make(chan []byte,4)
-	b.tx<-[]byte("one");b.tx<-[]byte("two")
+	b := testBIP(t)
+	b.active = 8
+	b.tx = make(chan []byte, 4)
+	b.tx <- []byte("one")
+	b.tx <- []byte("two")
 	b.fastHealthy.Store(true)
 	var flags byte
-	b.emit=func(p []byte)error{flags=p[20+13];return nil}
-	b.deliverOne(0,4,5,pendingModePull,time.Now())
-	if flags&bipFlagPulled==0 || flags&bipFlagMore!=0 {t.Fatal("healthy FAST perpetuates PULL polling")}
-	if len(b.tx)!=1 {t.Fatal("PULL did not deliver its response")}
+	b.emit = func(p []byte) error { flags = p[20+13]; return nil }
+	b.deliverOne(0, 4, 5, pendingModePull, time.Now())
+	if flags&bipFlagPulled == 0 || flags&bipFlagMore != 0 {
+		t.Fatal("healthy FAST perpetuates PULL polling")
+	}
+	if len(b.tx) != 1 {
+		t.Fatal("PULL did not deliver its response")
+	}
 }
 
 // Exercise repeated loss after ramp-up; a DATA timeout must not invalidate a
