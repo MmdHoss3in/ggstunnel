@@ -101,7 +101,7 @@ func TestWideACKDelayedBulk(t *testing.T) {
 	for i := 0; i < count; i++ {
 		p := bytes.Repeat([]byte{byte(i)}, 1280)
 		binary.BigEndian.PutUint32(p, uint32(i))
-		if err := a.Send(p); err != nil {
+		if err := a.SendContext(ctx, p); err != nil {
 			t.Fatal(err)
 		}
 	}

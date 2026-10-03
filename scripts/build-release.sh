@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
-VERSION="${VERSION:-0.3.0-rc2}"
+VERSION="${VERSION:-0.3.0-rc3}"
 mkdir -p dist
 # Validation is run by CI before packaging; this script builds deterministic
 # target binaries and manifests and can also be called locally after testing.

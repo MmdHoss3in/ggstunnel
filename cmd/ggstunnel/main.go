@@ -14,7 +14,7 @@ import (
 	"ggstunnel/internal/engine"
 )
 
-var version = "0.3.0-rc2"
+var version = "0.3.0-rc3"
 
 func main() {
 	cfgPath := flag.String("c", "", "path to JSON config")

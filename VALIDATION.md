@@ -28,6 +28,8 @@ The separate carrier-only simulator recorded roughly 491Mbps FAST and 319Mbps PU
 
 ## Limits that remain
 
+The unreleased rc2 tag's loss test had one iperf control/transfer failure while the identical commit passed a separate main-branch run. rc3 bounds the unsent queue separately from the flight window to reduce queueing under loss; the failed run is retained in Actions history. This is not evidence of multi-day stability.
+
 Loss materially reduces BIP throughput: the synthetic loss measurement above remains a performance limitation, not a successful 100Mbps result. Reliability/backpressure fixes do not remove the bounded congestion window, retransmission delay, inner TCP congestion control or provider ICMP policing. The known queue and path-reset bugs were addressed; there is no claim that all possible bugs or bottlenecks have been eliminated.
 
 The release job repeats validation on the exact tagged source. amd64 is executed; arm64 is cross-compiled. Ubuntu 22.04 and multi-day real Iran/foreign WAN uptime have not been exercised by this workflow. A passing short test is not a stable-release or throughput guarantee.

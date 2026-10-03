@@ -169,6 +169,10 @@ func NewBIP(c *config.Config) (Carrier, error) {
 	}
 	b := &BIP{tuner: newBIPTuner(c), cfg: c, local: l, peer: p, localID: sid, master: master, gate: g, rawfd: -1, id: binary.BigEndian.Uint16(seed[8:]), tx: make(chan []byte, c.Performance.QueueSize), rx: make(chan []byte, c.Performance.QueueSize), incoming: make(chan []byte, c.Performance.QueueSize), errors: make(chan error, 1), pending: make(map[uint32]*pendingData), rxAck: sackWindow{init: true, seen: make(map[uint32]bool)}, replay: frame.NewReplayGuard(65536)}
 	b.closed = make(chan struct{})
+	// The retransmission window and the unsent backlog serve different
+	// purposes. Keep at most two scheduling bursts waiting ahead of inner
+	// TCP control traffic even when the flight window can reach 4096.
+	b.tx = make(chan []byte, min(c.Performance.QueueSize, 256))
 	b.publishTuner(time.Now())
 	return b, nil
 }

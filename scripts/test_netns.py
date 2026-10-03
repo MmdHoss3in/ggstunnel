@@ -15,7 +15,11 @@ import time
 ROOT=Path(__file__).resolve().parents[1]
 
 def run(*args, **kw):
-    return subprocess.run(list(map(str,args)),check=True,text=True,capture_output=True,**kw)
+    try:
+        return subprocess.run(list(map(str,args)),check=True,text=True,capture_output=True,**kw)
+    except subprocess.CalledProcessError as error:
+        print(error.stdout, error.stderr, flush=True)
+        raise
 
 def main():
     if os.geteuid()!=0: raise RuntimeError('Requires root on a disposable Linux runner')

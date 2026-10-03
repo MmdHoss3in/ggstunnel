@@ -9,6 +9,20 @@ import (
 	"ggstunnel/internal/config"
 )
 
+func TestSmallBacklogRetainsLargeFlightWindow(t *testing.T) {
+	c := simConfig("server")
+	c.Performance.QueueSize = 8192
+	x, err := NewBIP(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := x.(*BIP)
+	defer b.Close()
+	if cap(b.tx) != 256 || b.window() != 4096 || b.tuner.maxWindow != 4096 {
+		t.Fatal("queue latency bound must not shrink the high-BDP flight window")
+	}
+}
+
 func TestPendingHeapDeadlineOrderAndCleanup(t *testing.T) {
 	b := testBIP(t)
 	b.tuner = adaptiveTuner()

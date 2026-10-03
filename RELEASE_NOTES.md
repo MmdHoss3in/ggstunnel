@@ -1,4 +1,4 @@
-# v0.3.0-rc2 — BIP5 recovery, bounded backpressure and offline menu
+# v0.3.0-rc3 — BIP5 recovery, bounded backpressure and offline menu
 
 This release candidate keeps the BIP5 wire format. Upgrade both peers to benefit from the new sender and receiver behavior.
 
@@ -8,6 +8,7 @@ This release candidate keeps the BIP5 wire format. Upgrade both peers to benefit
 - Bound congestion reductions to a transmitted flight, so staggered deadlines for the same loss episode cannot repeatedly halve the window. PULL-based loss recovery uses the same controller.
 - Apply cancellable, bounded BIP and TCP backpressure to the real TUN reader instead of dropping frames on a full userspace send queue.
 - Preserve Linux TCP receive/send buffer autotuning instead of forcing socket sizes that may be capped by global socket limits. Datagram carriers retain their configured socket buffers.
+- Separate BIP's unsent backlog (at most 256 frames) from its 4096-frame flight window. New/default TUN queues use 256 packets; menu option 21 applies this to existing BIP configurations. This bounds queueing delay without capping the bandwidth-delay product at 256 frames.
 - Batch dedicated ACKs while preserving authenticated ICMP reply tuples and immediate duplicate acknowledgements.
 - Replace full pending-map timeout scans with an indexed deadline heap. Remove acknowledged entries immediately.
 - Use current time, rather than an aged ticker timestamp, for scheduling.

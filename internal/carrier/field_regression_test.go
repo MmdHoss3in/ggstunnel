@@ -29,7 +29,7 @@ func TestFieldServerRequestsBlockedAndReplyLoss(t *testing.T) {
 	for i := uint32(1); i <= 350; i++ {
 		p := make([]byte, 1200)
 		binary.BigEndian.PutUint32(p, i)
-		if err := a.Send(p); err != nil {
+		if err := a.SendContext(ctx, p); err != nil {
 			t.Fatal(err)
 		}
 	}
