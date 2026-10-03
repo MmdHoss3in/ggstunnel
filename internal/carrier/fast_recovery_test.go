@@ -21,10 +21,14 @@ func TestSACKFastRecoveryNeedsDistinctEvidence(t *testing.T) {
 		t.Fatal("duplicate SACK accelerated recovery")
 	}
 	b.processPeerAckAt(0, 0b11110, now.Add(2*time.Millisecond))
-	if _, ok := b.takeTimedOut(now.Add(19*time.Millisecond), time.Second); ok {
+	due := b.pending[1].deadline
+	if due.Before(now.Add(10 * time.Millisecond)) {
+		t.Fatal("minimum reordering allowance was ignored")
+	}
+	if _, ok := b.takeTimedOut(due.Add(-time.Nanosecond), time.Second); ok {
 		t.Fatal("reordering allowance was ignored")
 	}
-	p, ok := b.takeTimedOut(now.Add(21*time.Millisecond), time.Second)
+	p, ok := b.takeTimedOut(due, time.Second)
 	if !ok || p.item.seq != 1 || !p.fast {
 		t.Fatal("SACK hole did not enter fast recovery")
 	}
