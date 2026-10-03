@@ -32,11 +32,11 @@ type Engine struct {
 	codec       *frame.Codec
 	reasm       *frame.Reassembler
 
-	txPackets atomic.Uint64
-	rxPackets atomic.Uint64
-	txBytes   atomic.Uint64
-	rxBytes   atomic.Uint64
-	drops     atomic.Uint64
+	txPackets     atomic.Uint64
+	rxPackets     atomic.Uint64
+	txBytes       atomic.Uint64
+	rxBytes       atomic.Uint64
+	drops         atomic.Uint64
 	tunQueueDrops atomic.Uint64
 
 	replays     atomic.Uint64
@@ -204,49 +204,49 @@ func (e *Engine) tunToCarrier(ctx context.Context) error {
 }
 
 func (e *Engine) sendPacket(ctx context.Context, pkt []byte) error {
-		pid := e.codec.NextPacketID()
-		maxp := e.cfg.Performance.MaxFramePayload
-		cnt := (len(pkt) + maxp - 1) / maxp
-		if cnt < 1 {
-			cnt = 1
+	pid := e.codec.NextPacketID()
+	maxp := e.cfg.Performance.MaxFramePayload
+	cnt := (len(pkt) + maxp - 1) / maxp
+	if cnt < 1 {
+		cnt = 1
+	}
+	if cnt > 65535 {
+		return fmt.Errorf("packet too fragmented")
+	}
+	for i := 0; i < cnt; i++ {
+		a := i * maxp
+		z := a + maxp
+		if z > len(pkt) {
+			z = len(pkt)
 		}
-		if cnt > 65535 {
-			return fmt.Errorf("packet too fragmented")
+		w, err := e.codec.Seal(frame.TypeData, pid, uint16(i), uint16(cnt), pkt[a:z])
+		if err != nil {
+			return err
 		}
-		for i := 0; i < cnt; i++ {
-			a := i * maxp
-			z := a + maxp
-			if z > len(pkt) {
-				z = len(pkt)
-			}
-			w, err := e.codec.Seal(frame.TypeData, pid, uint16(i), uint16(cnt), pkt[a:z])
-			if err != nil {
-				return err
-			}
-			var sendErr error
-			if sender, ok := e.carrier.(interface {
-				SendContext(context.Context, []byte) error
-			}); ok {
-				sendErr = sender.SendContext(ctx, w)
-			} else {
-				sendErr = e.carrier.Send(w)
-			}
-			if sendErr != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				e.drops.Add(1)
-				continue
-			}
+		var sendErr error
+		if sender, ok := e.carrier.(interface {
+			SendContext(context.Context, []byte) error
+		}); ok {
+			sendErr = sender.SendContext(ctx, w)
+		} else {
+			sendErr = e.carrier.Send(w)
 		}
-		e.txPackets.Add(1)
-		e.txBytes.Add(uint64(len(pkt)))
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if sendErr != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			e.drops.Add(1)
+			continue
 		}
-		return nil
+	}
+	e.txPackets.Add(1)
+	e.txBytes.Add(uint64(len(pkt)))
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	return nil
 }
 
 func (e *Engine) carrierToTun(ctx context.Context) error {

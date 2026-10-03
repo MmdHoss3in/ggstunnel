@@ -354,8 +354,11 @@ def impairments():
 def recovery_focus():
     failures=0
     with Pair(supervised=True) as pair:
-        for i,scenario in enumerate(('3%','asymmetric','blackhole30','blackhole60')):
-            failures+=recovery_trial(pair,2000+i,scenario,120 if scenario=='blackhole60' else 90 if scenario=='blackhole30' else 45)
+        # Include the exact trial IDs/seeds that failed the complete release
+        # gate, alongside the earlier focused seeds. Do not cherry-pick a pass.
+        for trial,scenario in ((2000,'3%'),(2001,'asymmetric'),(1010,'blackhole30'),
+                               (1011,'blackhole60'),(2002,'blackhole30'),(2003,'blackhole60')):
+            failures+=recovery_trial(pair,trial,scenario,120 if scenario=='blackhole60' else 90 if scenario=='blackhole30' else 45)
     return failures
 
 

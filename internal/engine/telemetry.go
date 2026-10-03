@@ -43,7 +43,7 @@ func (e *Engine) SnapshotTelemetry(now time.Time) Telemetry {
 		TxReadPackets: e.txPackets.Load(), RxDeliveredPackets: e.rxPackets.Load(),
 		TxReadBytes: e.txBytes.Load(), RxDeliveredBytes: e.rxBytes.Load(), EnqueueDrops: e.drops.Load(),
 		TUNQueueDrops: e.tunQueueDrops.Load(),
-		Replays: e.replays.Load(), AuthenticationFailures: e.authFails.Load(), Malformed: e.malformed.Load()}
+		Replays:       e.replays.Load(), AuthenticationFailures: e.authFails.Load(), Malformed: e.malformed.Load()}
 	if c, ok := e.carrier.(carrier.Statser); ok {
 		v := c.SnapshotStats()
 		s.Carrier = &v
