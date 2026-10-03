@@ -27,6 +27,12 @@ jobs:
           - { mode: steady-loss, profile: bip, shard: 0, runner: ubuntu-24.04 }
           - { mode: compatibility, profile: bip, shard: 0, runner: ubuntu-24.04 }
           - { mode: lifecycle, profile: bip, shard: 0, runner: ubuntu-24.04 }
+          - { mode: capacity, profile: bip, shard: 0, runner: ubuntu-24.04 }
+          - { mode: capacity, profile: bip, shard: 1, runner: ubuntu-24.04 }
+          - { mode: capacity, profile: bip, shard: 2, runner: ubuntu-24.04 }
+          - { mode: capacity, profile: bip, shard: 3, runner: ubuntu-24.04 }
+          - { mode: capacity-hold, profile: bip, shard: 0, runner: ubuntu-24.04 }
+          - { mode: capacity-hold, profile: bip, shard: 0, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
@@ -74,7 +80,7 @@ jobs:
         working-directory: release-source
         run: |
           mkdir -p ../boundary-results
-          go test -race -tags audit ./internal/carrier ./internal/frame ./internal/session ./internal/engine -run 'Wrap|Boundary|Expiry|Budget|Rotation|WorkerShutdown|WideSACK|PersistentRetransmission|PathReturn|TCPBatch|KeyLifetime|RecoveryUses|PathSilence|FairQueue|BIPDrains' -count=50 -timeout 6m -v | tee ../boundary-results/boundaries.log
+          go test -race -tags audit ./internal/carrier ./internal/frame ./internal/session ./internal/engine -run 'Wrap|Boundary|Expiry|Budget|Rotation|WorkerShutdown|WideSACK|PersistentRetransmission|PathReturn|TCPBatch|KeyLifetime|RecoveryUses|PathSilence|FairQueue|BIPDrains|FASTEventPump|CoalescesActor' -count=50 -timeout 6m -v | tee ../boundary-results/boundaries.log
       - name: Diagnostic live heap and goroutine cycles
         shell: bash
         run: |
@@ -104,6 +110,7 @@ jobs:
           test '${{ needs.experiments.result }}' = success
           test '${{ needs.boundaries.result }}' = success
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: extended-final-report
           path: |

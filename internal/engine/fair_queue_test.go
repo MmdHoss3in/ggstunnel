@@ -133,13 +133,13 @@ func TestBIPDrainsTUNDuringBlockedCarrierAndCancels(t *testing.T) {
 		cfg.ApplyDefaults()
 		codec, _ := frame.NewCodec("0123456789abcdef")
 		receiver, _ := frame.NewCodec("0123456789abcdef")
-		d := &packetDeviceFake{in: make(chan []byte, 128), closed: make(chan struct{})}
-		c := &heldCarrier{gate: make(chan struct{}), out: make(chan []byte, 128)}
+		d := &packetDeviceFake{in: make(chan []byte, fairPacketsPerFlow+128), closed: make(chan struct{})}
+		c := &heldCarrier{gate: make(chan struct{}), out: make(chan []byte, fairPacketsPerFlow+128)}
 		e := &Engine{cfg: cfg, tun: d, codec: codec, carrier: c}
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() { done <- e.tunToCarrier(ctx) }()
-		for i := 0; i < 100; i++ {
+		for i := 0; i < fairPacketsPerFlow+64; i++ {
 			d.in <- flowPacket(1, uint16(i))
 		}
 		d.in <- flowPacket(2, 42)

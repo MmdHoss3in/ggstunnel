@@ -7,7 +7,7 @@ import (
 )
 
 const fairFlows = 1024
-const fairPacketsPerFlow = 32
+const fairPacketsPerFlow = 128
 const fairBytes = 8 << 20
 
 type flowKey [38]byte

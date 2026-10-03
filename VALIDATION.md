@@ -16,6 +16,8 @@ The exact tag's required jobs are defined in [.github/workflows/ci.yml](.github/
 | Real rc4 compatibility | 2; old server/new client and new server/old client | Verified downloaded rc4 release, existing flow integrity, >=30Mbps clean 100Mbps path |
 | Resource load/idle | 90 cycles across amd64/arm64 | Fixed PIDs for 15min; 1/4/16 TCP streams, alternate direction, small UDP datagrams |
 | Resource integrity / summary | 2 integrity + 4 peer summaries | Hashed same socket; peak RSS <256MiB, late FD median <= early+8 |
+| Capacity scaling | 32 transfers + 16 direct baselines; 100/200/500/1000Mbps, 20/80ms, both directions, 2 repeats | 20s measured after 5s warm-up, 8 streams and concurrent integrity; >=200Mbps on high-capacity paths when baseline permits |
+| Constant-load holds | 2, amd64 and arm64; 500Mbps/80ms path | Same installed processes, 600s measured after 15s warm-up, receiver interval JSON, every one-minute median >=200Mbps, late median >=75% early, hashed flow progress, peak RSS <256MiB |
 | Lifecycle | 30 | Fresh start/stop and verified payload |
 | Boundaries | 50 repetitions of selected Go tests under race/audit | Sequence wrap, expiry, retry budget, retirement/key lifetime, wide SACK and shutdown |
 
@@ -31,10 +33,12 @@ For 60/60 successes, the exact one-sided 95% lower bound is 95.13% **only for th
 
 ## Remaining field validation
 
-The operator will test multi-day Iran/foreign traffic and real Xray users. Stable release approval requires those observations. Sustained loss remains a material BIP throughput constraint; ordered delivery can hold other inner flows behind a missing frame. ICMP policing, asymmetric congestion, NAT and provider routing changes can impose further limits. Automatic outer PMTU discovery is not implemented: coordinate both peers' smaller TUN/payload configuration when needed.
+The operator will test multi-day Iran/foreign traffic and real Xray users. Cloud release assessment is scoped to the listed automated gates; multi-day field behavior remains unmeasured even if the release is designated stable. Sustained loss remains a material BIP throughput constraint; ordered delivery can hold other inner flows behind a missing frame. ICMP policing, asymmetric congestion, NAT and provider routing changes can impose further limits. Automatic outer PMTU discovery is not implemented: coordinate both peers' smaller TUN/payload configuration when needed.
 
 rc5 handles exhausted BIP retry/identity budgets and safe data-key lifetime limits using fresh transport/codec identity in the same process. It recreates TUN and forwarding listeners; individual user connections may need reconnecting. Unexpected kernel/configuration failures still rely on systemd. Short RSS/heap/FD/goroutine observations screen for defects but cannot exclude slow leaks.
 
 ## Historical evidence
 
 [The rc4 extended report](EXTENDED_VALIDATION.md) and [Persian report](EXTENDED_VALIDATION-fa.md) retain the earlier unchanged rc4 results and their limits. Their endpoint-egress topology and offload behavior differ from rc5; its TCP high-RTT numbers are not a controlled runtime comparison. Previous releases retain their own exact-build JSONL assets. Current results are appended to the rc5 GitHub Release with extended-report.md and extended-summary.json.
+
+The 508 observations are heterogeneous scenario checks, not 508 independent samples of multi-day reliability. Confidence is reported only for the specified 60 short recovery trials. An extrapolation to another mission time or server population would require a validated usage/failure model; none is claimed. See [NIST reliability projection guidance](https://www.itl.nist.gov/div898/handbook/apr/section4/apr43.htm).

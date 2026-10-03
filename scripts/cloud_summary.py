@@ -38,12 +38,19 @@ def main():
     failures = [r for r in rows if r.get('status') in ('fail', 'target_miss', 'resource_limit')]
     summary['failed_or_target_missed_cases'] = len(failures)
     counts = {kind: sum(r.get('kind') == kind for r in rows) for kind in
-              ('baseline', 'performance', 'resource_cycle', 'resource_integrity', 'resource_summary', 'lifecycle', 'steady_loss', 'compatibility')}
+              ('baseline', 'performance', 'resource_cycle', 'resource_integrity', 'resource_summary', 'lifecycle', 'steady_loss', 'compatibility','capacity_baseline','capacity','capacity_hold')}
     counts['impairments'] = sum(r.get('kind') == 'recovery' and r.get('scenario') != 'blackhole3' for r in rows)
     summary['observation_counts'] = counts
     expected = dict(baseline=60, performance=180, resource_cycle=90, resource_integrity=2,
-                    resource_summary=4, lifecycle=30, impairments=12, steady_loss=18, compatibility=2)
+                    resource_summary=4, lifecycle=30, impairments=12, steady_loss=18, compatibility=2,
+                    capacity_baseline=16,capacity=32,capacity_hold=2)
     summary['planned_observations_complete'] = all(counts[k] == n for k, n in expected.items()) and summary['planned_60_trials_complete']
+    capacities=[r for r in rows if r.get('kind')=='capacity']
+    capacity_keys={(r.get('rate_mbps'),r.get('rtt_ms'),r.get('reverse'),r.get('repeat')) for r in capacities}
+    required_capacity={(rate,rtt,reverse,repeat) for rate in (100,200,500,1000) for rtt in (20,80) for reverse in (False,True) for repeat in range(2)}
+    holds=[r for r in rows if r.get('kind')=='capacity_hold']
+    summary['capacity_scenarios_complete']=len(capacities)==32 and capacity_keys==required_capacity and len(holds)==2 and {r.get('architecture') for r in holds}=={'amd64','arm64'}
+    summary['planned_observations_complete'] = summary['planned_observations_complete'] and summary['capacity_scenarios_complete']
     boundary_files = list((ROOT / 'collected').rglob('boundaries.log'))
     diagnostic_files = list((ROOT / 'collected').rglob('resources.log'))
     boundary_logs = '\n'.join(p.read_text() for p in boundary_files)
@@ -84,6 +91,12 @@ def main():
     text += '\n## Steady impaired transfers and compatibility\n\n'
     for row in rows:
         if row.get('kind') in ('steady_loss','compatibility'): text += '- ' + json.dumps(row) + '\n'
+    text += '\n## Capacity scaling and sustained load\n\n'
+    text += '100/200/500/1000Mbps links, 20/80ms RTT, both directions, eight TCP streams, two fresh runs per scenario. Receiver throughput is measured; a link rate is not a promised tunnel rate. The separate ten-minute holds use eight streams on a 500Mbps/80ms path, the same installed processes, receiver-side interval JSON, one-minute medians >=200Mbps, late median >=75% of early median, concurrent hashed-flow progress, and RSS <256MiB. These are short load tests, not validated acceleration models for days of uptime.\n\n'
+    for row in rows:
+        if row.get('kind') in ('capacity','capacity_hold'):
+            concise={k:v for k,v in row.items() if k!='end_snapshot'}
+            text += '- ' + json.dumps(concise) + '\n'
     (ROOT / 'extended-report.md').write_text(text)
     (ROOT / 'extended-summary.json').write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))

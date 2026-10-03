@@ -100,7 +100,7 @@ type PacketIO interface {
 }
 
 type BIP struct {
-	txReady chan struct{}
+	txReady                                                                                          chan struct{}
 	lossFlightEnd                                                                                    uint32
 	lossFlightSet                                                                                    bool
 	retryHeap                                                                                        pendingHeap
@@ -975,19 +975,26 @@ func (b *BIP) deliverOne(typ byte, id, tuple uint16, mode byte, now time.Time) {
 	}
 }
 func (b *BIP) notifyTX() {
-	select { case b.txReady <- struct{}{}: default: }
+	select {
+	case b.txReady <- struct{}{}:
+	default:
+	}
 }
 
 // FAST reacts to producer and ACK events instead of waiting for a maintenance
 // tick. Work per event remains bounded; congestion, pacing and SACK horizon
 // checks remain in deliverOne. A finite backlog is not a packets-per-tick cap.
 func (b *BIP) pumpFast(now time.Time) {
-	if b.active == 0 || !now.Before(b.fastUntil) || b.pathUnresponsive(now) { return }
+	if b.active == 0 || !now.Before(b.fastUntil) || b.pathUnresponsive(now) {
+		return
+	}
 	for i := 0; i < b.cfg.Tuner.MaxBurst && len(b.tx) > 0; i++ {
 		previous := b.dataSeq
 		id, s := b.nextTuple()
 		b.deliverOne(0, id, s, pendingModeFast, now)
-		if b.dataSeq == previous { break }
+		if b.dataSeq == previous {
+			break
+		}
 	}
 }
 func (b *BIP) run(ctx context.Context) {
