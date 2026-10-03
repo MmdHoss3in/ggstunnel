@@ -2,8 +2,6 @@
 
 این شاخه شامل نامزد **`v0.3.1-rc1`** برای اصلاح بازیابی BIP پس از سکوت همتا است و هنوز Release منتشرشده نیست. نسخه منتشرشده قبلی `v0.3.0` است. [شرح اصلاح و مراحل بعد](docs/stability-recovery.md)؛ اعداد آزمون‌های 0.3.0 در ادامه، نتیجه آزمون این نامزد محسوب نمی‌شوند.
 
-این شاخه شامل نامزد **`v0.3.1-rc1`** برای اصلاح بازیابی BIP پس از سکوت همتا است و هنوز Release منتشرشده نیست. نسخه منتشرشده قبلی `v0.3.0` است. [شرح اصلاح و مراحل بعد](docs/stability-recovery.md)؛ اعداد آزمون‌های 0.3.0 در ادامه، نتیجه آزمون این نامزد محسوب نمی‌شوند.
-
 [![Linux validation](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml/badge.svg)](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml)
 
 ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سرورها و عبور ترافیک سرویس‌هایی مثل Xray است. هسته با Go و منوی مدیریت با Python نوشته شده است. پروتکل اصلی **BIP5 روی ICMP** است؛ TCP، UDP، ICMP خام و GRE اختصاصی نیز پشتیبانی می‌شوند.

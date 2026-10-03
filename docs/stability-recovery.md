@@ -25,6 +25,28 @@ The regression simulates a path that stops accepting session traffic until a new
 
 Hard recovery recreates TUN and forwarding listeners, so existing application connections may need to reconnect. After changing identity there is no guarantee of preserving the same application TCP connection. Short rehandshake keeps the existing identity and in-flight state when the peer can be confirmed.
 
+## Candidate cloud results
+
+The [focused amd64/arm64 run](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37158182127) passed on source `e6fc187033e9994fde18323a92971c23a5958995`. The released 0.3.0 source failed the constructed rehandshake regression after its four-second deadline on both architectures. The repaired source passed 20 consecutive race-enabled repetitions on each architecture, normally in 1.04 seconds, retaining the original identity and delivering all 32 payloads in order. This demonstrates the repaired failure model, not population-wide or multi-day reliability.
+
+Both native runners also passed formatting, vet, all short race/audit tests, version/configuration checks, 24 manager/installer unit tests, and real systemd install, ON, active upgrade, rollback, STOP and OFF. The unit tests intentionally inject some failures; printed FAIL diagnostics inside those passing tests are not failed cloud jobs.
+
+Real encrypted TUN samples used a routed 100Mbps link, 80ms base RTT, eight-second samples after two seconds of warmup, and fresh sessions for each direction:
+
+| Injected loss | amd64 forward / reverse Mbps | arm64 forward / reverse Mbps |
+| --- | --- | --- |
+| 0% | 80.496 / 68.817 | 81.251 / 73.667 |
+| 0.2% | 6.540 / 6.684 | 10.725 / 4.195 |
+| 1% | 2.481 / 1.835 | 2.006 / 3.015 |
+
+The loss checks passed their connectivity floor of 1Mbps; they did **not** pass a high-throughput target. Loss sensitivity remains severe and makes independent ordering/recovery and queue latency the next performance priorities. These samples establish neither a fixed 10Mbps cap nor the exact cause of the user's field slowdown.
+
+After a three-second blackhole, the existing framed TCP flow resumed 0.299 seconds after link restoration on amd64 and 0.331 seconds on arm64, with payload integrity checks. Peer restart recovered reachability in 1.189 / 1.204 seconds. An outer MTU of 1200 passed with manually matched TUN MTU 1040; this is not automatic PMTU adaptation.
+
+The [standard short validation run](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37158185911) also passed: fuzzing three authenticated parser/controller targets, real raw ICMP and TUN cancellation tests, nine concurrent BIP peers, all five carriers through the shaped TUN path, and installation/verification of the actual generated archive. Native Ubuntu 22.04 amd64 and Ubuntu 24.04 arm64 systemd/race checks passed. The longer extended release matrix and publication were intentionally skipped for this focused draft PR; they remain required on main and release tags. BIP no-loss samples in this second run were 78.092 / 58.065Mbps, again showing short-sample variation.
+
+No supplied reference executable and no local Go/Python runtime was executed for these tests. The code remains an unpublished candidate in [draft PR #1](https://github.com/MmdHoss3in/ggstunnel/pull/1); the published Stable release remains v0.3.0. Subsequent documentation-only edits do not change the tested executable source.
+
 ## Remaining work, in priority order
 
 1. Obtain simultaneous Iran/foreign telemetry and verify the installed versions. Test the repaired candidate with the path and traffic that triggered the freeze. Record idle and loaded ping, received throughput, retransmits, reorder_buffered, peer silence, recoveries and per-core CPU. A cloud simulation does not resolve the missing field diagnosis.
