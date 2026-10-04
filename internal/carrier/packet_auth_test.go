@@ -68,14 +68,22 @@ func TestPartialDataBatchRetainsUnsentFlightForRetry(t *testing.T) {
 	b.collectDATA = true
 	now := time.Now()
 	for i := 0; i < 3; i++ {
-		b.tx <- []byte{byte(i+1)}
+		b.tx <- []byte{byte(i + 1)}
 		b.deliverOne(0, 9, uint16(i+1), pendingModeFast, now)
 	}
-	if len(b.pending) != 3 || len(b.dataBatch) != 3 || b.wireTxBytes.Load() != 0 { t.Fatal("DATA not retained before batch emission") }
+	if len(b.pending) != 3 || len(b.dataBatch) != 3 || b.wireTxBytes.Load() != 0 {
+		t.Fatal("DATA not retained before batch emission")
+	}
 	b.flushDataBatch()
-	if len(b.pending) != 3 || len(b.dataBatch) != 0 || b.wireTxBytes.Load() != 93 || b.txErrors.Load() != 2 { t.Fatal("unsent DATA flight lost or accounted as success") }
+	if len(b.pending) != 3 || len(b.dataBatch) != 0 || b.wireTxBytes.Load() != 93 || b.txErrors.Load() != 2 {
+		t.Fatal("unsent DATA flight lost or accounted as success")
+	}
 	b.processPeerAckAt(1, 0, now.Add(time.Millisecond))
-	if len(b.pending) != 2 { t.Fatal("unacknowledged suffix removed") }
+	if len(b.pending) != 2 {
+		t.Fatal("unacknowledged suffix removed")
+	}
 	retry, ok := b.takeTimedOut(now.Add(time.Second), 250*time.Millisecond)
-	if !ok || retry.item.seq < 2 || !bytes.Equal(retry.item.data, []byte{byte(retry.item.seq)}) { t.Fatal("unsent suffix not eligible for ordinary retry") }
+	if !ok || retry.item.seq < 2 || !bytes.Equal(retry.item.data, []byte{byte(retry.item.seq)}) {
+		t.Fatal("unsent suffix not eligible for ordinary retry")
+	}
 }

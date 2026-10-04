@@ -418,13 +418,15 @@ func (b *BIP) Close() error {
 		if b.recv != nil {
 			b.recv.Close()
 		}
-		if b.started && b.rawfd >= 0 {
-			syscall.Close(b.rawfd)
-		}
 		if b.backend != nil {
 			b.backend.Close()
 		}
 		b.workers.Wait()
+		// The raw sender is nonblocking. Keep its descriptor valid until the
+		// actor has stopped, so a concurrent open cannot reuse it mid-send.
+		if b.started && b.rawfd >= 0 {
+			syscall.Close(b.rawfd)
+		}
 		b.trace.close()
 	})
 	return nil
@@ -1243,38 +1245,56 @@ func (b *BIP) processIncomingBatch(ctx context.Context, p []byte) {
 	for i := 0; i < 16 && ctx.Err() == nil; i++ {
 		b.handle(p, time.Now())
 		b.pumpFast(time.Now())
-		if i == 15 { return }
-		select { case p = <-b.incoming: default: return }
+		if i == 15 {
+			return
+		}
+		select {
+		case p = <-b.incoming:
+		default:
+			return
+		}
 	}
 }
 func (b *BIP) flushDataBatch() {
 	packets := b.dataBatch
-	if len(packets) == 0 { return }
+	if len(packets) == 0 {
+		return
+	}
 	b.dataBatch = nil
 	if b.batchEmit == nil {
-		for _, packet := range packets { b.recordWireResult(packet, b.emit(packet) == nil) }
+		for _, packet := range packets {
+			b.recordWireResult(packet, b.emit(packet) == nil)
+		}
 		return
 	}
 	n, err := b.batchEmit(packets)
 	if errors.Is(err, syscall.ENOSYS) {
 		b.batchEmit = nil
-		for _, packet := range packets { b.recordWireResult(packet, b.emit(packet) == nil) }
+		for _, packet := range packets {
+			b.recordWireResult(packet, b.emit(packet) == nil)
+		}
 		return
 	}
 	n = max(0, min(n, len(packets)))
-	for i, packet := range packets { b.recordWireResult(packet, i < n) }
+	for i, packet := range packets {
+		b.recordWireResult(packet, i < n)
+	}
 	// Every DATA frame was retained in pending before preparation. The unsent
 	// suffix therefore takes the same paced retry path as a scalar send error.
 }
 func (b *BIP) send(typ byte, id, tuple uint16, kind, flags byte, token uint32, payload []byte, target uint64) error {
-	if kind != bipKindData { b.flushDataBatch() }
+	if kind != bipKindData {
+		b.flushDataBatch()
+	}
 	ip, err := b.prepareWire(typ, id, tuple, kind, flags, token, payload, target)
 	if err != nil {
 		return err
 	}
 	if kind == bipKindData && b.collectDATA && b.batchEmit != nil {
 		b.dataBatch = append(b.dataBatch, ip)
-		if len(b.dataBatch) >= 64 { b.flushDataBatch() }
+		if len(b.dataBatch) >= 64 {
+			b.flushDataBatch()
+		}
 		return nil
 	}
 	err = b.emit(ip)

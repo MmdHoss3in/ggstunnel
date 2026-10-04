@@ -58,7 +58,10 @@ func (b *BIP) detectSACKLoss(delivered []ackDelivery, now time.Time) {
 		if p.item.retries > 0 && b.tuner != nil {
 			allowance = max(allowance, b.tuner.srtt*5/4)
 		}
-		deadline := maxTime(now, p.sent.Add(allowance))
+		// Reordering is observed when SACK evidence arrives, usually an RTT
+		// after transmission. A send-time-only grace has already elapsed then
+		// and would turn a briefly reordered original into immediate loss.
+		deadline := maxTime(now.Add(guard), p.sent.Add(allowance))
 		if deadline.Before(p.deadline) {
 			p.deadline = deadline
 			p.fast = true

@@ -75,6 +75,14 @@ jobs:
           test "$result" -ne 0
           grep -q -- '--- FAIL: TestBIPSingleReplyStatefulHandshake' field-artifacts/path-baseline.log
           grep -q -- '--- FAIL: TestFASTReplyRetriesAvoidBlockedRequestDirection' field-artifacts/path-baseline.log
+          cp internal/carrier/fast_recovery_test.go "$BASE/internal/carrier/"
+          set +e
+          (cd "$BASE" && go test ./internal/carrier -run '^TestSACKReorderGraceStartsWhenEvidenceArrives$' -count=1 -timeout 10s -v) > field-artifacts/reorder-baseline.log 2>&1
+          result=$?
+          set -e
+          cat field-artifacts/reorder-baseline.log
+          test "$result" -ne 0
+          grep -q 'late SACK feedback erased its reordering grace' field-artifacts/reorder-baseline.log
       - name: Build installer and manager checks
         run: |
           bash scripts/build-release.sh
