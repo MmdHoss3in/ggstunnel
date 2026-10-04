@@ -132,6 +132,7 @@ type BIP struct {
 	local, peer                                                                                      net.IP
 	localID                                                                                          uint64
 	master, sessionKey                                                                               []byte
+	masterAuth, sessionAuth                                                                          packetAuthenticator
 	gate                                                                                             *session.Gate
 	active                                                                                           uint64
 	peerSpan                                                                                         int
@@ -807,9 +808,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 	if len(body) >= 72 && len(body) <= 1480 && body[0] == 0 && string(body[8:12]) == bipMagic && checksum(body) == 0 && binary.BigEndian.Uint64(body[16:24]) == b.localID {
 		key := b.macKey(body[12])
 		if len(key) > 0 {
-			original := append([]byte(nil), body...)
-			original[0] = 8
-			tag := packetMAC(key, original)
+			tag := b.wireMAC(body, 8)
 			if hmac.Equal(tag[:], body[56:72]) {
 				b.reflectionsSuppressed.Add(1)
 				return
@@ -1251,13 +1250,14 @@ func (b *BIP) send(typ byte, id, tuple uint16, kind, flags byte, token uint32, p
 		payload = b.ackExtension(ack)
 	}
 	p := wirePacket{typ: typ, kind: kind, flags: flags, id: id, tuple: tuple, sender: b.localID, target: target, number: b.packetNo, token: token, ack: ack, sack: sack, payload: payload}
-	body, err := b.encode(p)
-	if err != nil {
-		return err
-	}
-	ip := make([]byte, 20+len(body))
-	if len(ip) > 1500 {
+	if 20+72+len(payload) > 1500 {
 		return syscall.EMSGSIZE
+	}
+	// Encode directly after the IPv4 header: no second full DATA allocation
+	// and copy before the synchronous packet backend consumes the buffer.
+	ip := make([]byte, 20+72+len(payload))
+	if err := b.writeBody(p, ip[20:]); err != nil {
+		return err
 	}
 	ip[0] = 0x45
 	binary.BigEndian.PutUint16(ip[2:4], uint16(len(ip)))
@@ -1266,7 +1266,6 @@ func (b *BIP) send(typ byte, id, tuple uint16, kind, flags byte, token uint32, p
 	ip[9] = 1
 	copy(ip[12:16], b.local)
 	copy(ip[16:20], b.peer)
-	copy(ip[20:], body)
 	binary.BigEndian.PutUint16(ip[10:12], checksum(ip[:20]))
 	if err := b.emit(ip); err != nil {
 		b.traceRecord(traceEvent{At: time.Now(), Event: "wire_tx", Seq: token, Ack: ack, Sack: sack, Kind: kind, Type: typ, Error: true})
@@ -1289,11 +1288,17 @@ func (b *BIP) macKey(kind byte) []byte {
 	return b.sessionKey
 }
 func (b *BIP) encode(p wirePacket) ([]byte, error) {
+	body := make([]byte, 72+len(p.payload))
+	if err := b.writeBody(p, body); err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+func (b *BIP) writeBody(p wirePacket, body []byte) error {
 	key := b.macKey(p.kind)
 	if len(key) == 0 {
-		return nil, errors.New("unknown session")
+		return errors.New("unknown session")
 	}
-	body := make([]byte, 72+len(p.payload))
 	body[0] = p.typ
 	binary.BigEndian.PutUint16(body[4:6], p.id)
 	binary.BigEndian.PutUint16(body[6:8], p.tuple)
@@ -1307,10 +1312,10 @@ func (b *BIP) encode(p wirePacket) ([]byte, error) {
 	binary.BigEndian.PutUint32(body[44:48], p.ack)
 	binary.BigEndian.PutUint64(body[48:56], p.sack)
 	copy(body[72:], p.payload)
-	tag := packetMAC(key, body)
+	tag := b.wireMAC(body, body[0])
 	copy(body[56:72], tag[:])
 	binary.BigEndian.PutUint16(body[2:4], checksum(body))
-	return body, nil
+	return nil
 }
 func packetMAC(key, body []byte) [16]byte {
 	h := hmac.New(sha256.New, key)
@@ -1334,7 +1339,7 @@ func (b *BIP) decode(body []byte) (wirePacket, error) {
 	if len(key) == 0 {
 		return p, errBIPUnknownSession
 	}
-	tag := packetMAC(key, body)
+	tag := b.wireMAC(body, body[0])
 	if !hmac.Equal(tag[:], body[56:72]) {
 		return p, errBIPBadMAC
 	}

@@ -62,6 +62,12 @@ def main():
                             pair.executables = [executable, executable]
                             firewall(pair, mode)
                             pair.shape(rate, 80)
+                            queue_factor = int(os.environ.get('GGS_FIELD_QUEUE_FACTOR', '1'))
+                            if queue_factor != 1:
+                                for dev in pair.router_devs:
+                                    run('ip', 'netns', 'exec', pair.router, 'tc', 'qdisc', 'change', 'dev', dev, 'root',
+                                        'netem', 'limit', str(queue_factor*pair.queue_limit), 'delay', '40ms', 'rate', f'{rate}mbit')
+                            row['queue_factor'] = queue_factor
                             pair.restart()
                             before = pair.sample(); began = time.monotonic()
                             result = pair.finish_iperf(*pair.iperf('10.77.1.2', 10, 2, reverse, 16), 45)

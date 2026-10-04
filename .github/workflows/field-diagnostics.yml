@@ -42,7 +42,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y iperf3 ethtool
-          sudo env GITHUB_ACTIONS=true GGS_FIELD_BASE="$GGS_FIELD_BASE" GGS_FIELD_MODE=stateful GGS_FIELD_PROFILE="$PWD/field-artifacts" python3 scripts/field_performance.py || true
+          sudo env GITHUB_ACTIONS=true GGS_FIELD_BASE="$GGS_FIELD_BASE" GGS_FIELD_MODE=stateful GGS_FIELD_QUEUE_FACTOR=4 GGS_FIELD_PROFILE="$PWD/field-artifacts" python3 scripts/field_performance.py || true
           for file in field-artifacts/*.pprof; do
             go tool pprof -top -nodecount=25 dist/ggstunnel-linux-amd64 "$file"
           done | tee field-artifacts/cpu-top.txt
