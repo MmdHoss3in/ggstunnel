@@ -57,6 +57,9 @@ def main():
                 for label, executable in versions:
                     row = dict(case=mode, link_mbps=rate, base_rtt_ms=80, reverse=reverse,
                                version_label=label, architecture=ARCH, sample_sec=10, warmup_sec=2)
+                    row['host_cpus'] = len(os.sched_getaffinity(0))
+                    quota_file = Path('/sys/fs/cgroup/cpu.max')
+                    row['cpu_quota'] = quota_file.read_text().strip() if quota_file.exists() else None
                     try:
                         with Pair('bip') as pair:
                             pair.executables = [executable, executable]

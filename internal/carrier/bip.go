@@ -1237,7 +1237,9 @@ func (b *BIP) run(ctx context.Context) {
 }
 func (b *BIP) send(typ byte, id, tuple uint16, kind, flags byte, token uint32, payload []byte, target uint64) error {
 	ip, err := b.prepareWire(typ, id, tuple, kind, flags, token, payload, target)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	err = b.emit(ip)
 	b.recordWireResult(ip, err == nil)
 	return err

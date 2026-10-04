@@ -53,29 +53,45 @@ func (b *bipSocketBatch) read(fd uintptr) (int, error) {
 }
 
 func sendBIPMessages(fd int, packets [][]byte, peer net.IP) (int, error) {
-	if len(packets) == 0 { return 0, nil }
-	if len(packets) > 64 { return 0, syscall.EINVAL }
+	if len(packets) == 0 {
+		return 0, nil
+	}
+	if len(packets) > 64 {
+		return 0, syscall.EINVAL
+	}
 	var messages [64]bipMessage
 	var iov [64]syscall.Iovec
 	address := syscall.RawSockaddrInet4{Family: syscall.AF_INET}
 	if peer != nil {
-		if peer.To4() == nil { return 0, syscall.EINVAL }
+		if peer.To4() == nil {
+			return 0, syscall.EINVAL
+		}
 		copy(address.Addr[:], peer.To4())
 	}
 	for i, packet := range packets {
-		if len(packet) == 0 { return 0, syscall.EINVAL }
-		iov[i].Base = &packet[0]; iov[i].SetLen(len(packet))
-		messages[i].header.Iov = &iov[i]; messages[i].header.Iovlen = 1
+		if len(packet) == 0 {
+			return 0, syscall.EINVAL
+		}
+		iov[i].Base = &packet[0]
+		iov[i].SetLen(len(packet))
+		messages[i].header.Iov = &iov[i]
+		messages[i].header.Iovlen = 1
 		if peer != nil {
 			messages[i].header.Name = (*byte)(unsafe.Pointer(&address))
 			messages[i].header.Namelen = syscall.SizeofSockaddrInet4
 		}
 	}
 	for {
-		n, _, errno := syscall.Syscall6(syscall.SYS_SENDMMSG, uintptr(fd), uintptr(unsafe.Pointer(&messages[0])), uintptr(len(packets)), syscall.MSG_DONTWAIT, 0, 0)
-		runtime.KeepAlive(packets); runtime.KeepAlive(iov); runtime.KeepAlive(address)
-		if errno == syscall.EINTR { continue }
-		if errno != 0 { return 0, errno }
+		n, _, errno := syscall.Syscall6(bipSendMmsg, uintptr(fd), uintptr(unsafe.Pointer(&messages[0])), uintptr(len(packets)), syscall.MSG_DONTWAIT, 0, 0)
+		runtime.KeepAlive(packets)
+		runtime.KeepAlive(iov)
+		runtime.KeepAlive(address)
+		if errno == syscall.EINTR {
+			continue
+		}
+		if errno != 0 {
+			return 0, errno
+		}
 		return int(n), nil
 	}
 }

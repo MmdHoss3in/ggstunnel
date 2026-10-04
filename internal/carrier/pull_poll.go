@@ -128,12 +128,20 @@ func (b *BIP) sendPullProbe(now time.Time) bool {
 func (b *BIP) sendPullProbes(now time.Time, quota int) int {
 	if b.batchEmit == nil {
 		sent := 0
-		for i := 0; i < quota; i++ { if b.sendPullProbe(now) { sent++ } }
+		for i := 0; i < quota; i++ {
+			if b.sendPullProbe(now) {
+				sent++
+			}
+		}
 		return sent
 	}
 	quota = min(quota, 4*b.window()-len(b.poll.requests))
-	if quota <= 0 { return 0 }
-	if b.poll.requests == nil { b.poll.requests = make(map[uint32]time.Time) }
+	if quota <= 0 {
+		return 0
+	}
+	if b.poll.requests == nil {
+		b.poll.requests = make(map[uint32]time.Time)
+	}
 	sent := 0
 	for remaining := quota; remaining > 0; {
 		count := min(remaining, 64)
@@ -142,25 +150,44 @@ func (b *BIP) sendPullProbes(now time.Time, quota int) int {
 		for i := 0; i < count; i++ {
 			id, tuple := b.nextTuple()
 			ip, err := b.prepareWire(8, id, tuple, bipKindPullProbe, 0, 0, nil, b.active)
-			if err != nil { break }
-			packets = append(packets, ip); tuples = append(tuples, pullTuple(id, tuple))
+			if err != nil {
+				break
+			}
+			packets = append(packets, ip)
+			tuples = append(tuples, pullTuple(id, tuple))
 		}
-		if len(packets) == 0 { break }
+		if len(packets) == 0 {
+			break
+		}
 		n, err := b.batchEmit(packets)
 		if errors.Is(err, syscall.ENOSYS) {
 			b.batchEmit = nil
 			n = 0
-			for _, packet := range packets { if b.emit(packet) != nil { break }; n++ }
+			for _, packet := range packets {
+				if b.emit(packet) != nil {
+					break
+				}
+				n++
+			}
 		}
 		n = max(0, min(n, len(packets)))
 		for i, packet := range packets {
 			b.recordWireResult(packet, i < n)
-			if i < n { b.poll.requests[tuples[i]] = now }
+			if i < n {
+				b.poll.requests[tuples[i]] = now
+			}
 		}
-		sent += n; remaining -= count
-		if n < count { break }
+		sent += n
+		remaining -= count
+		if n < count {
+			break
+		}
 		if b.batchEmit == nil {
-			for i := 0; i < remaining; i++ { if b.sendPullProbe(now) { sent++ } }
+			for i := 0; i < remaining; i++ {
+				if b.sendPullProbe(now) {
+					sent++
+				}
+			}
 			break
 		}
 	}

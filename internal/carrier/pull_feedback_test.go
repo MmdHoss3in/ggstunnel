@@ -70,21 +70,35 @@ func TestPullBatchAccountsOnlySuccessfulPrefix(t *testing.T) {
 		b.active = 8
 		var emitted [][]byte
 		b.emit = func(packet []byte) error {
-			if fallback && len(emitted) >= 2 { return syscall.EAGAIN }
-			emitted = append(emitted, packet); return nil
+			if fallback && len(emitted) >= 2 {
+				return syscall.EAGAIN
+			}
+			emitted = append(emitted, packet)
+			return nil
 		}
 		b.batchEmit = func(packets [][]byte) (int, error) {
-			if fallback { return 0, syscall.ENOSYS }
-			emitted = packets[:2]; return 2, nil
+			if fallback {
+				return 0, syscall.ENOSYS
+			}
+			emitted = packets[:2]
+			return 2, nil
 		}
-		if n := b.sendPullProbes(time.Now(), 5); n != 2 { t.Fatalf("sent count %d", n) }
-		if len(b.poll.requests) != 2 || b.controlTxBytes.Load() != 184 || b.wireTxBytes.Load() != 184 || b.txErrors.Load() != 3 { t.Fatal("unsent prefix registered or counted as wire success") }
+		if n := b.sendPullProbes(time.Now(), 5); n != 2 {
+			t.Fatalf("sent count %d", n)
+		}
+		if len(b.poll.requests) != 2 || b.controlTxBytes.Load() != 184 || b.wireTxBytes.Load() != 184 || b.txErrors.Load() != 3 {
+			t.Fatal("unsent prefix registered or counted as wire success")
+		}
 		for _, packet := range emitted {
 			body := packet[20:]
 			key := pullTuple(binary.BigEndian.Uint16(body[4:6]), binary.BigEndian.Uint16(body[6:8]))
-			if _, ok := b.poll.requests[key]; !ok { t.Fatal("successful request tuple missing") }
+			if _, ok := b.poll.requests[key]; !ok {
+				t.Fatal("successful request tuple missing")
+			}
 		}
-		if fallback && b.batchEmit != nil { t.Fatal("unsupported batching not disabled") }
+		if fallback && b.batchEmit != nil {
+			t.Fatal("unsupported batching not disabled")
+		}
 	}
 }
 

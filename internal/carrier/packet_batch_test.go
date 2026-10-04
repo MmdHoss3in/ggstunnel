@@ -54,11 +54,22 @@ func TestReceiveBatchDrainsAvailableDatagramsWithoutWaiting(t *testing.T) {
 
 func TestSendBatchRetainsDatagramBoundaries(t *testing.T) {
 	fd, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_DGRAM|syscall.SOCK_NONBLOCK, 0)
-	if err != nil { t.Fatal(err) }
-	defer syscall.Close(fd[0]); defer syscall.Close(fd[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(fd[0])
+	defer syscall.Close(fd[1])
 	packets := [][]byte{[]byte("one"), []byte("second"), []byte("three")}
-	if n, err := sendBIPMessages(fd[1], packets, nil); err != nil || n != len(packets) { t.Fatalf("send: %d %v", n, err) }
+	if n, err := sendBIPMessages(fd[1], packets, nil); err != nil || n != len(packets) {
+		t.Fatalf("send: %d %v", n, err)
+	}
 	batch := newBIPSocketBatch()
-	if n, err := batch.read(uintptr(fd[0])); err != nil || n != len(packets) { t.Fatalf("receive: %d %v", n, err) }
-	for i, packet := range packets { if !bytes.Equal(batch.data[i][:batch.msg[i].length], packet) { t.Fatal("batch merged or reordered datagrams") } }
+	if n, err := batch.read(uintptr(fd[0])); err != nil || n != len(packets) {
+		t.Fatalf("receive: %d %v", n, err)
+	}
+	for i, packet := range packets {
+		if !bytes.Equal(batch.data[i][:batch.msg[i].length], packet) {
+			t.Fatal("batch merged or reordered datagrams")
+		}
+	}
 }
