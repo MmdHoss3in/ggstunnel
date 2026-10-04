@@ -143,6 +143,7 @@ type BIP struct {
 	recv                                                                                             *net.IPConn
 	rawfd                                                                                            int
 	emit                                                                                             func([]byte) error
+	batchEmit                                                                                        func([][]byte) (int, error)
 	cancel                                                                                           context.CancelFunc
 	workers                                                                                          sync.WaitGroup
 	closeOnce                                                                                        sync.Once
@@ -315,6 +316,7 @@ func (b *BIP) Start(ctx context.Context) error {
 		copy(sa.Addr[:], b.peer)
 		return syscall.Sendto(fd, w, 0, sa)
 	}
+	b.batchEmit = func(packets [][]byte) (int, error) { return sendBIPMessages(fd, packets, b.peer) }
 	child := b.startActor(ctx)
 	b.workers.Add(1)
 	go func() { defer b.workers.Done(); b.readLoop(child) }()
@@ -1140,11 +1142,7 @@ func (b *BIP) run(ctx context.Context) {
 				quota := int(b.pullCredit)
 				b.pullCredit -= float64(quota)
 
-				for i := 0; i < quota; i++ {
-					if b.sendPullProbe(now) {
-						b.pullProbeTx.Add(1)
-					}
-				}
+				b.pullProbeTx.Add(uint64(b.sendPullProbes(now, quota)))
 			}
 			if len(b.tx) > 0 && !fast && now.Sub(b.lastNeedPull) >= time.Duration(b.cfg.Transport.BIPNeedPullMS)*time.Millisecond {
 				id, s := b.nextTuple()
@@ -1238,12 +1236,19 @@ func (b *BIP) run(ctx context.Context) {
 	}
 }
 func (b *BIP) send(typ byte, id, tuple uint16, kind, flags byte, token uint32, payload []byte, target uint64) error {
+	ip, err := b.prepareWire(typ, id, tuple, kind, flags, token, payload, target)
+	if err != nil { return err }
+	err = b.emit(ip)
+	b.recordWireResult(ip, err == nil)
+	return err
+}
+func (b *BIP) prepareWire(typ byte, id, tuple uint16, kind, flags byte, token uint32, payload []byte, target uint64) ([]byte, error) {
 	if b.emit == nil {
-		return errors.New("carrier not started")
+		return nil, errors.New("carrier not started")
 	}
 	b.packetNo++
 	if b.packetNo == 0 {
-		return errors.New("packet counter exhausted")
+		return nil, errors.New("packet counter exhausted")
 	}
 	ack, sack := b.takeAckForSend()
 	if kind == bipKindAck {
@@ -1251,13 +1256,13 @@ func (b *BIP) send(typ byte, id, tuple uint16, kind, flags byte, token uint32, p
 	}
 	p := wirePacket{typ: typ, kind: kind, flags: flags, id: id, tuple: tuple, sender: b.localID, target: target, number: b.packetNo, token: token, ack: ack, sack: sack, payload: payload}
 	if 20+72+len(payload) > 1500 {
-		return syscall.EMSGSIZE
+		return nil, syscall.EMSGSIZE
 	}
 	// Encode directly after the IPv4 header: no second full DATA allocation
 	// and copy before the synchronous packet backend consumes the buffer.
 	ip := make([]byte, 20+72+len(payload))
 	if err := b.writeBody(p, ip[20:]); err != nil {
-		return err
+		return nil, err
 	}
 	ip[0] = 0x45
 	binary.BigEndian.PutUint16(ip[2:4], uint16(len(ip)))
@@ -1267,19 +1272,23 @@ func (b *BIP) send(typ byte, id, tuple uint16, kind, flags byte, token uint32, p
 	copy(ip[12:16], b.local)
 	copy(ip[16:20], b.peer)
 	binary.BigEndian.PutUint16(ip[10:12], checksum(ip[:20]))
-	if err := b.emit(ip); err != nil {
-		b.traceRecord(traceEvent{At: time.Now(), Event: "wire_tx", Seq: token, Ack: ack, Sack: sack, Kind: kind, Type: typ, Error: true})
+	return ip, nil
+}
+func (b *BIP) recordWireResult(ip []byte, success bool) {
+	body := ip[20:]
+	if b.trace != nil {
+		b.traceRecord(traceEvent{At: time.Now(), Event: "wire_tx", Seq: binary.BigEndian.Uint32(body[40:44]), Ack: binary.BigEndian.Uint32(body[44:48]), Sack: binary.BigEndian.Uint64(body[48:56]), Kind: body[12], Type: body[0], Error: !success})
+	}
+	if !success {
 		b.txErrors.Add(1)
-		return err
+		return
 	}
 	b.wireTxBytes.Add(uint64(len(ip)))
-	if kind == bipKindData {
+	if body[12] == bipKindData {
 		b.dataWireTxBytes.Add(uint64(len(ip)))
 	} else {
 		b.controlTxBytes.Add(uint64(len(ip)))
 	}
-	b.traceRecord(traceEvent{At: time.Now(), Event: "wire_tx", Seq: token, Ack: ack, Sack: sack, Kind: kind, Type: typ})
-	return nil
 }
 func (b *BIP) macKey(kind byte) []byte {
 	if kind >= bipKindHello {
