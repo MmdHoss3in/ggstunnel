@@ -10,7 +10,7 @@ case "$MODE" in
   *) echo 'Usage: install.sh [menu|install|update]'; exit 2 ;;
 esac
 [[ $EUID == 0 ]] || { echo 'Run with sudo/root'; exit 1; }
-VERSION="${GGS_VERSION:-v0.3.1-rc1}"
+VERSION="${GGS_VERSION:-v0.3.1-rc2}"
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo 'Invalid version'; exit 2; }
 command -v curl >/dev/null || { echo 'Install curl and ca-certificates first: apt-get install -y curl ca-certificates'; exit 1; }
 WORK=$(mktemp -d)

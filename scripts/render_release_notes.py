@@ -19,4 +19,20 @@ for line in (root/'artifacts/recovery-results.jsonl').read_text().splitlines():
     notes+='\n'
 notes+='\n## Extended exact-source validation\n\n'
 notes+=(root/'artifacts/extended-report.md').read_text()
+field=[]
+for path in sorted((root/'field-collected').glob('*/field-artifacts/field-results.jsonl')):
+    field.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
+if field:
+    candidates=[r for r in field if r['version_label']=='candidate']
+    if len(field)!=56 or len(candidates)!=28 or any(r['status']!='pass' for r in candidates):
+        raise SystemExit('Missing or failed tagged field observations')
+    notes+='\n## Directional field-pattern A/B checks\n\n'
+    notes+='56 retained observations (28 rc1, 28 candidate), 16 TCP streams, 80ms RTT, 10 measured seconds after 2s warm-up. Impaired passes require progress, not 100Mbps. Full raw observations and failure history are in field-performance-results.tar.gz.\n\n'
+    notes+='| Arch | Case | Link Mbps | Direction | Version | Received Mbps | Iran PULL probe pps | Status |\n|---|---|---:|---|---|---:|---:|---|\n'
+    for r in field:
+        direction='reverse' if r['reverse'] else 'forward'
+        polls=r.get('feedback',[{}])[0].get('pull_probe_pps','n/a')
+        notes+=f"| {r['architecture']} | {r['case']} | {r['link_mbps']} | {direction} | {r['version_label']} | {r.get('received_mbps','n/a')} | {polls} | {r['status']} |\n"
+elif (root/'field-collected').exists():
+    raise SystemExit('Tagged field observation files missing')
 (root/'artifacts/release-notes.md').write_text(notes)

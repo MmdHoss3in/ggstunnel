@@ -65,7 +65,7 @@ func TestPullFeedbackRequestMemoryAndExpiryBound(t *testing.T) {
 func TestPullFeedbackAsymmetricContinuousTraffic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	l := &simLink{adaptive: true, copies: 1, requests: make(map[[3]uint16]time.Time)}
+	l := &simLink{adaptive: true, delay: time.Millisecond, copies: 1, requests: make(map[[3]uint16]time.Time)}
 	l.configure = func(c *config.Config) { c.Tuner.UnlimitedRate = true; c.Transport.BIPPullBurst = 128 }
 	var latePolls, lateData int
 	began := time.Now()
@@ -88,11 +88,22 @@ func TestPullFeedbackAsymmetricContinuousTraffic(t *testing.T) {
 		workers.Add(2)
 		go func(e *BIP) {
 			defer workers.Done()
-			for seq := uint32(1); ; seq++ {
-				packet := make([]byte, 1200)
-				binary.BigEndian.PutUint32(packet, seq)
-				if e.SendContext(ctx, packet) != nil {
+			tick := time.NewTicker(time.Millisecond)
+			defer tick.Stop()
+			seq := uint32(1)
+			for {
+				select {
+				case <-ctx.Done():
 					return
+				case <-tick.C:
+					for batch := 0; batch < 2; batch++ {
+						packet := make([]byte, 1200)
+						binary.BigEndian.PutUint32(packet, seq)
+						if e.SendContext(ctx, packet) != nil {
+							return
+						}
+						seq++
+					}
 				}
 			}
 		}(endpoint)

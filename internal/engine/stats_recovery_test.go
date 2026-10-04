@@ -64,7 +64,8 @@ func TestStatsRecoveryDoesNotCountHistoricalTrafficAsRate(t *testing.T) {
 				t.Fatal(line)
 			}
 			var tx, tp, rx, rp float64
-			_, err := fmt.Sscanf(line[at:], "rate{tx=%fMbps/%fpps rx=%fMbps/%fpps}", &tx, &tp, &rx, &rp)
+			rates := strings.NewReplacer("rate{tx=", "", "Mbps/", " ", "pps rx=", " ", "pps}", " ").Replace(line[at:])
+			_, err := fmt.Sscanf(rates, "%f %f %f %f", &tx, &tp, &rx, &rp)
 			if err != nil || tx < 7.5 || tx > 8.5 || rx < 15 || rx > 17 || tp < 95 || tp > 105 || rp < 190 || rp > 210 {
 				t.Fatalf("epoch %d counted historical traffic or wrong interval: %s (%v)", epoch, line, err)
 			}

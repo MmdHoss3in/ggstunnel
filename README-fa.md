@@ -1,6 +1,6 @@
 # ggstunnel — تانل رمز‌شدهٔ ایران ↔ خارج
 
-این شاخه شامل نامزد **`v0.3.1-rc1`** برای آزمایش میدانی اصلاح بازیابی BIP پس از سکوت همتا است. نسخه Stable قبلی `v0.3.0` است. [شرح اصلاح و مراحل بعد](docs/stability-recovery.md)؛ اعداد آزمون‌های 0.3.0 در ادامه، نتیجه آزمون این نامزد محسوب نمی‌شوند.
+این شاخه شامل نامزد **`v0.3.1-rc2`** با اصلاح سربار PULL، آمار پس از بازیابی و نمایش بافر واقعی سوکت است. نسخه Stable قبلی `v0.3.0` است. [شرح اصلاح و آزمایش مسیر نامتقارن](docs/field-performance.md)؛ اعداد آزمون‌های 0.3.0 در ادامه، نتیجه آزمون این نامزد محسوب نمی‌شوند.
 
 [![Linux validation](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml/badge.svg)](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml)
 
@@ -8,16 +8,20 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 
 **نسخهٔ فعلی: `v0.3.0`، Stable با دامنه آزمون مستند ابری.** تست‌های خودکار جای آزمایش مسیر واقعی ایران–خارج یا پایداری چندروزه را نمی‌گیرند. سرعت تضمین‌شده یا ادعای عبور از هر نوع محدودیت شبکه نداریم.
 
-## نصب نامزد آزمایشی v0.3.1-rc1
+## نصب نامزد آزمایشی v0.3.1-rc2
 
 این نسخه برای آزمایش میدانی است؛ افت سرعت زیر packet loss هنوز حل نشده و بازیابی کامل ممکن است اتصال کاربران را قطع و وصل کند. روی **هر دو سرور**، ابتدا خارج و سپس ایران، اجرا کنید. نصب کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند.
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.1-rc1/install.sh -o /tmp/ggstunnel-rc1-install.sh &&
-sudo bash /tmp/ggstunnel-rc1-install.sh update
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.1-rc2/install.sh -o /tmp/ggstunnel-rc2-install.sh &&
+sudo env GGS_VERSION=v0.3.1-rc2 bash /tmp/ggstunnel-rc2-install.sh update
 ```
 
-نیاز به Go یا ساخت باینری روی سرور نیست. [Release آزمایشی](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.1-rc1) شامل بسته و SHA256SUMS است؛ اینستالر checksum آرشیو و بسته را کنترل می‌کند. بازکردن منو با `sudo ggstunnel` پیش‌نیازها را دوباره بررسی نمی‌کند. بازگشت به نسخه قبلی: `sudo ggstunnel rollback`.
+نیاز به Go یا ساخت باینری روی سرور نیست. [Release آزمایشی](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.1-rc2) شامل بسته و SHA256SUMS است؛ اینستالر checksum آرشیو و بسته را کنترل می‌کند. بازکردن منو با `sudo ggstunnel` پیش‌نیازها را دوباره بررسی نمی‌کند. بازگشت به نسخه قبلی: `sudo ggstunnel rollback`.
+
+برای کانفیگ قدیمی BIP، روی هر دو سمت گزینه **۱۶** و سپس **۲۱** را اجرا کنید؛ گزینه ۲۱ کانفیگ را پشتیبان می‌گیرد و سرویس فعال را restart می‌کند. اگر ۲۱ قبلاً اجرا شده، بعد از ۱۶ گزینه ۶ برای restart کافی است. این کار وقفه کوتاه دارد. گزینه ۱۶ سقف بافر kernel را حداقل ۱۶MiB می‌کند؛ گزینه ۲۱ بافر درخواستی BIP را حداقل ۴MiB می‌کند، اندازه‌های بزرگ‌تر را نگه می‌دارد و محدودیت دستی PPS تیونر را غیرفعال می‌کند. کنترل ازدحام، پنجره تحویل و محدودیت حافظه همچنان فعال‌اند؛ این تنظیمات سرعت یا اشباع CPU را تضمین نمی‌کنند.
+
+در rc2، نرخ PULL فقط از DATA برگشتی معتبر با tuple درخواست خودمان تغذیه می‌شود. مسیر بی‌پاسخ تا بودجه کشف مجدد ۵۰ درخواست در ثانیه عقب می‌نشیند؛ probe دوره‌ای مستقل نیز باقی می‌ماند. لاگ `pull_feedback` و JSON آمار، دریافت PULL، پاسخ مرتبط، درخواست‌های باقی‌مانده/منقضی و بودجه polling را نشان می‌دهند. خط شروع `BIP socket buffers` اندازه واقعی بافر kernel را نشان می‌دهد؛ اعداد Linux شامل حسابداری دوبرابری‌اند.
 
 ## نصب از GitHub Release
 

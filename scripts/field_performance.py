@@ -69,8 +69,10 @@ def main():
                                 feedback.append(delta)
                             row.update(**result, feedback=feedback, processes_unchanged=
                                        [a['pid'] for a in before['peers']] == [b['pid'] for b in after['peers']])
+                            row['internal_recoveries'] = [b.get('telemetry', {}).get('internal_recoveries', 0)-a.get('telemetry', {}).get('internal_recoveries', 0)
+                                                          for a, b in zip(before['peers'], after['peers'])]
                             floor = 100 if mode == 'clean' else 1
-                            row['status'] = 'pass' if result['received_mbps'] >= floor and row['processes_unchanged'] else 'fail'
+                            row['status'] = 'pass' if result['received_mbps'] >= floor and row['processes_unchanged'] and not any(row['internal_recoveries']) else 'fail'
                             if label == 'candidate' and mode == 'asymmetric' and feedback[0]['pull_probe_pps'] > 200:
                                 row['status'] = 'fail'; row['reason'] = 'Unanswered PULL overhead exceeded 200pps average'
                             if label == 'candidate' and mode == 'stateful' and not any(x['pulled_data_rx'] > 0 for x in feedback):

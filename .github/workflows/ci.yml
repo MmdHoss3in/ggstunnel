@@ -115,12 +115,17 @@ jobs:
         with:
           name: extended-final-report
           path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: field-performance-*
+          path: field-collected
       - name: Publish tested version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           test "$GITHUB_REF_NAME" = "v$(cat internal/version/VERSION)"
           python3 scripts/render_release_notes.py
+          tar -czf artifacts/field-performance-results.tar.gz -C field-collected .
           flags=(--latest)
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl artifacts/recovery-results.jsonl artifacts/extended-summary.json artifacts/extended-report.md --verify-tag "${flags[@]}" --title "ggstunnel $GITHUB_REF_NAME" --notes-file artifacts/release-notes.md
+          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl artifacts/recovery-results.jsonl artifacts/extended-summary.json artifacts/extended-report.md artifacts/field-performance-results.tar.gz --verify-tag "${flags[@]}" --title "ggstunnel $GITHUB_REF_NAME" --notes-file artifacts/release-notes.md
