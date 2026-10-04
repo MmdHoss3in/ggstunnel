@@ -126,6 +126,7 @@ func (b *BIP) sendPullProbe(now time.Time) bool {
 // kernel send registers only its successful prefix; unsent tuples cannot fund
 // feedback or inflate wire-success counters. No DATA waits in a batch queue.
 func (b *BIP) sendPullProbes(now time.Time, quota int) int {
+	b.flushDataBatch()
 	if b.batchEmit == nil {
 		sent := 0
 		for i := 0; i < quota; i++ {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"testing"
+	"time"
 )
 
 func TestCachedPacketMACMatchesWireAcrossKeysAndTypes(t *testing.T) {
@@ -56,4 +57,25 @@ func TestSingleBufferIPEncodingRetainsAuthenticatedPayload(t *testing.T) {
 	if err := b.send(0, 9, 10, bipKindData, bipFlagPulled, 17, []byte("retained DATA"), 8); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestPartialDataBatchRetainsUnsentFlightForRetry(t *testing.T) {
+	b := testBIP(t)
+	b.active = 8
+	b.tx = make(chan []byte, 3)
+	b.emit = func([]byte) error { return nil }
+	b.batchEmit = func(packets [][]byte) (int, error) { return 1, nil }
+	b.collectDATA = true
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		b.tx <- []byte{byte(i+1)}
+		b.deliverOne(0, 9, uint16(i+1), pendingModeFast, now)
+	}
+	if len(b.pending) != 3 || len(b.dataBatch) != 3 || b.wireTxBytes.Load() != 0 { t.Fatal("DATA not retained before batch emission") }
+	b.flushDataBatch()
+	if len(b.pending) != 3 || len(b.dataBatch) != 0 || b.wireTxBytes.Load() != 93 || b.txErrors.Load() != 2 { t.Fatal("unsent DATA flight lost or accounted as success") }
+	b.processPeerAckAt(1, 0, now.Add(time.Millisecond))
+	if len(b.pending) != 2 { t.Fatal("unacknowledged suffix removed") }
+	retry, ok := b.takeTimedOut(now.Add(time.Second), 250*time.Millisecond)
+	if !ok || retry.item.seq < 2 || !bytes.Equal(retry.item.data, []byte{byte(retry.item.seq)}) { t.Fatal("unsent suffix not eligible for ordinary retry") }
 }
