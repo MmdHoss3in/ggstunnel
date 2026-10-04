@@ -431,7 +431,9 @@ func (b *BIP) Close() error {
 			b.backend.Close()
 		}
 		b.workers.Wait()
-		if b.echoFilterCleanup != nil { b.echoFilterCleanup() }
+		if b.echoFilterCleanup != nil {
+			b.echoFilterCleanup()
+		}
 		b.kernelEchoFilter.Store(false)
 		// The raw sender is nonblocking. Keep its descriptor valid until the
 		// actor has stopped, so a concurrent open cannot reuse it mid-send.

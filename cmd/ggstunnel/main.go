@@ -10,8 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"ggstunnel/internal/config"
 	"ggstunnel/internal/carrier"
+	"ggstunnel/internal/config"
 	"ggstunnel/internal/engine"
 	"ggstunnel/internal/version"
 )
@@ -46,7 +46,9 @@ func main() {
 		c.Telemetry.StatsFile = *statsFile
 	}
 	if *cleanupEcho {
-		if err := carrier.CleanupBIPReflectionFilter(c); err != nil { log.Printf("BIP kernel echo cleanup: %v", err) }
+		if err := carrier.CleanupBIPReflectionFilter(c); err != nil {
+			log.Printf("BIP kernel echo cleanup: %v", err)
+		}
 		return
 	}
 	if *check {

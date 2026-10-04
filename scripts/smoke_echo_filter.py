@@ -63,16 +63,16 @@ def main():
         for i in range(2):
             if rules(pair, i).count('ggstunnel-bip-echo-') != 1:
                 raise RuntimeError('Expected exactly one installed scoped rule per endpoint')
-            for kind in (-1, 1, 2, 3, 5, 6, 7):
+            for kind in (-1, 1, 2, 3, 4, 5, 6, 7):
                 actual = run('ip', 'netns', 'exec', pair.names[1-i], 'python3', '-c', PROBE,
                              pair.outer[1-i], pair.outer[i], kind).stdout.strip() == '1'
-                expected = kind not in (2, 3, 7)
+                expected = kind not in (3, 4, 7)
                 observations.append(dict(endpoint=i, kind=kind, reply=actual))
                 if actual != expected: raise RuntimeError(f'Wrong filter scope: endpoint={i}, kind={kind}')
         # Same magic/kind from a different outer peer must not match the rule.
         run('ip', '-n', pair.names[0], 'addr', 'add', '192.0.2.99/24', 'dev', pair.devs[0])
         actual = run('ip', 'netns', 'exec', pair.names[0], 'python3', '-c', PROBE,
-                     '192.0.2.99', pair.outer[1], 2).stdout.strip()
+                     '192.0.2.99', pair.outer[1], 4).stdout.strip()
         if actual != '1': raise RuntimeError('Filter affected an unrelated outer peer')
         pair.reachable()
         time.sleep(1.1)
@@ -91,7 +91,7 @@ def main():
                       inner_ping_pass=True, normal_stop_cleanup=True, sigkill_exec_stop_post_cleanup=True,
                       rules_before=before, rules_after=after)
         (OUT / 'echo-filter-scope.json').write_text(json.dumps(result, indent=2))
-        print('PASS: BIP kernel echo scope, DATA/ACK/FAST/ordinary ping, unrelated peer/rule, normal stop and SIGKILL ExecStopPost')
+        print('PASS: BIP kernel echo scope, DATA/ACK/FAST/FAST_ACK/ordinary ping, unrelated peer/rule, normal stop and SIGKILL ExecStopPost')
 
 
 if __name__ == '__main__': main()
