@@ -616,10 +616,12 @@ def optimize_existing():
         if c['profile']!='bip':continue
         c.setdefault('tuner',{}).update(mode='adaptive',unlimited_rate=True,max_burst=128)
         c.setdefault('transport',{}).update(bip_pull_burst=128,bip_max_retries=8)
+        c['transport']['sock_buf']=max(4<<20,c['transport'].get('sock_buf',4<<20))
         c['performance']['queue_size']=max(8192,c['performance'].get('queue_size',8192))
         c['tun']['tx_queue_len']=max(1024,c['tun'].get('tx_queue_len',1024))
         save_config(c,True)
     print('BIP performance defaults applied; both peers must run BIP5.')
+    print('Host socket ceilings are separate: option 16, then restart active tunnels. Existing larger buffers are preserved.')
 
 def run_logs(name):subprocess.run(['journalctl','-u',unit(name),'-n','100','--no-pager'])
 

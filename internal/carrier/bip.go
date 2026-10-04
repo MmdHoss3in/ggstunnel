@@ -14,6 +14,7 @@ import (
 	"ggstunnel/internal/frame"
 	"ggstunnel/internal/session"
 	"log"
+	"math"
 	mbits "math/bits"
 	"net"
 	"os"
@@ -103,6 +104,11 @@ type PacketIO interface {
 }
 
 type BIP struct {
+	socketReceiveBytes, socketSendBytes atomic.Int64
+	controlTxBytes, dataWireTxBytes atomic.Uint64
+	poll pullPoller
+	pulledDataRx, pullRepliesRx, pullOutstanding, pullRequestsExpired atomic.Uint64
+	pullBudgetPPS atomic.Uint64
 	txReady                                                                                          chan struct{}
 	lossFlightEnd                                                                                    uint32
 	lossFlightSet                                                                                    bool
@@ -113,9 +119,6 @@ type BIP struct {
 	ackType                                                                                          byte
 	ackID, ackTuple                                                                                  uint16
 	nextPullRetryCheck                                                                               time.Time
-	pullRate                                                                                         float64
-	pullSampleAt                                                                                     time.Time
-	pullSampleRX                                                                                     uint64
 	trace                                                                                            *bipTrace
 	tuner                                                                                            *bipTuner
 	tuning                                                                                           atomic.Pointer[TunerSnapshot]
@@ -287,8 +290,23 @@ func (b *BIP) Start(ctx context.Context) error {
 	if err = syscall.SetNonblock(fd, true); err != nil {
 		return fail(err)
 	}
-	_ = r.SetReadBuffer(b.cfg.Transport.SockBuf)
-	_ = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_SNDBUF, b.cfg.Transport.SockBuf)
+	if err := r.SetReadBuffer(b.cfg.Transport.SockBuf); err != nil {
+		log.Printf("BIP receive buffer request: %v", err)
+	}
+	if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_SNDBUF, b.cfg.Transport.SockBuf); err != nil {
+		log.Printf("BIP send buffer request: %v", err)
+	}
+	if conn, err := r.SyscallConn(); err == nil {
+		_ = conn.Control(func(receiveFD uintptr) {
+			if size, err := syscall.GetsockoptInt(int(receiveFD), syscall.SOL_SOCKET, syscall.SO_RCVBUF); err == nil {
+				b.socketReceiveBytes.Store(int64(size))
+			}
+		})
+	}
+	if size, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_SNDBUF); err == nil {
+		b.socketSendBytes.Store(int64(size))
+	}
+	log.Printf("BIP socket buffers requested=%d receive_kernel=%d send_kernel=%d (Linux values include doubled accounting)", b.cfg.Transport.SockBuf, b.socketReceiveBytes.Load(), b.socketSendBytes.Load())
 	b.recv = r
 	b.rawfd = fd
 	b.emit = func(w []byte) error {
@@ -713,8 +731,7 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.lossFlightSet = false
 	b.txAckBase = 0
 	b.nextPullRetryCheck = time.Time{}
-	b.pullRate = 1000
-	b.pullSampleAt = time.Time{}
+	b.poll = pullPoller{}
 	b.replay = frame.NewReplayGuard(65536)
 	b.fastUntil = time.Time{}
 	b.lastPeerActivity = time.Time{}
@@ -912,6 +929,12 @@ func (b *BIP) handle(body []byte, now time.Time) {
 		if len(p.payload) == 0 || p.token == 0 {
 			return
 		}
+		// A valid session packet is not necessarily a response to our polling.
+		// Only a pulled EchoReply with an outstanding tuple is feedback.
+		matchedPull := p.typ == 0 && p.flags&bipFlagPulled != 0 && b.poll.reply(p.id, p.tuple, now)
+		if matchedPull {
+			b.pullRepliesRx.Add(1)
+		}
 		b.ackMu.Lock()
 		w := &b.rxAck
 		duplicate := !seqAfter(p.token, w.max) || w.seen[p.token]
@@ -921,6 +944,11 @@ func (b *BIP) handle(body []byte, now time.Time) {
 		} else if sequenceDistance(w.max, p.token) <= uint32(b.window()) {
 			if !b.receiveOrdered(p.token, p.payload) {
 				b.pendingOverflow.Add(1)
+			} else if p.flags&bipFlagPulled != 0 {
+				b.pulledDataRx.Add(1)
+				if matchedPull {
+					b.poll.accepted++
+				}
 			}
 		}
 		b.ackMu.Unlock()
@@ -1079,40 +1107,17 @@ func (b *BIP) run(ctx context.Context) {
 			}
 			remotePull := now.Before(b.remotePullUntil)
 			b.pullActive.Store(remotePull)
+			pullRate := b.pollingRate(now, remotePull)
 			if now.Sub(b.lastIdle) >= time.Duration(b.cfg.Transport.BIPProbeMS)*time.Millisecond {
-				id, s := b.nextTuple()
-				_ = b.send(8, id, s, bipKindPullProbe, 0, 0, nil, b.active)
-				b.idleProbeTx.Add(1)
+				if b.sendPullProbe(now) {
+					b.idleProbeTx.Add(1)
+				}
 				b.lastIdle = now
 			}
 			if !remotePull {
 				b.pullCredit = 0
 			}
-			if b.pullRate == 0 {
-				b.pullRate = 1000
-			}
-			if b.pullSampleAt.IsZero() {
-				b.pullSampleAt = now
-				b.pullSampleRX = b.payloadFrameRx.Load()
-			}
-			if elapsed := now.Sub(b.pullSampleAt); elapsed >= 100*time.Millisecond {
-				count := b.payloadFrameRx.Load()
-				observed := float64(count-b.pullSampleRX) / elapsed.Seconds()
-				b.pullRate = max(1000, observed*1.5)
-				b.pullSampleAt = now
-				b.pullSampleRX = count
-			}
 			if remotePull {
-				pullRate := b.cfg.Transport.BIPPullPPS
-				if b.tuner != nil && b.tuner.adaptive() {
-					// Bound unsuccessful polling overhead independently of data rate.
-					// Sustained high-PPS tuning requires separate field validation.
-					if b.tuner.cfg.UnlimitedRate {
-						pullRate = int(b.pullRate)
-					} else {
-						pullRate = min(pullRate, b.tuner.cfg.MaxPPS)
-					}
-				}
 				b.pullCredit += float64(pullRate) * dt
 				if b.pullCredit > float64(b.cfg.Transport.BIPPullBurst) {
 					b.pullCredit = float64(b.cfg.Transport.BIPPullBurst)
@@ -1121,9 +1126,9 @@ func (b *BIP) run(ctx context.Context) {
 				b.pullCredit -= float64(quota)
 
 				for i := 0; i < quota; i++ {
-					id, s := b.nextTuple()
-					_ = b.send(8, id, s, bipKindPullProbe, 0, 0, nil, b.active)
-					b.pullProbeTx.Add(1)
+					if b.sendPullProbe(now) {
+						b.pullProbeTx.Add(1)
+					}
 				}
 			}
 			if len(b.tx) > 0 && !fast && now.Sub(b.lastNeedPull) >= time.Duration(b.cfg.Transport.BIPNeedPullMS)*time.Millisecond {
@@ -1249,6 +1254,11 @@ func (b *BIP) send(typ byte, id, tuple uint16, kind, flags byte, token uint32, p
 		return err
 	}
 	b.wireTxBytes.Add(uint64(len(ip)))
+	if kind == bipKindData {
+		b.dataWireTxBytes.Add(uint64(len(ip)))
+	} else {
+		b.controlTxBytes.Add(uint64(len(ip)))
+	}
 	b.traceRecord(traceEvent{At: time.Now(), Event: "wire_tx", Seq: token, Ack: ack, Sack: sack, Kind: kind, Type: typ})
 	return nil
 }
@@ -1336,5 +1346,51 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 	b.ackMu.Lock()
 	pending := len(b.pending)
 	b.ackMu.Unlock()
-	return RuntimeStats{PeerAuthenticated: b.peerID.Load() != 0, PeerSilenceMS: b.peerSilenceMS.Load(), RehandshakeTries: b.rehandshakeTries.Load(), PathSuspended: b.pathSuspended.Load(), FastRetransmits: b.fastRetries.Load(), ReorderBuffered: b.rxBuffered.Load(), WireTxBytes: b.wireTxBytes.Load(), WireRxBytes: b.wireRxBytes.Load(), FastDataTx: b.fastDataTx.Load(), PullDataTx: b.pullDataTx.Load(), CompatDataTx: b.compatDataTx.Load(), IdleProbeTx: b.idleProbeTx.Load(), FastProbeTx: b.fastProbeTx.Load(), FastAckTx: b.fastAckTx.Load(), NeedPullTx: b.needPullTx.Load(), PullProbeTx: b.pullProbeTx.Load(), FastAckRx: b.fastAckRx.Load(), NeedPullRx: b.needPullRx.Load(), PullProbeRx: b.pullProbeRx.Load(), ReflectionsSuppressed: b.reflectionsSuppressed.Load(), PayloadFrameRx: b.payloadFrameRx.Load(), HMACFail: b.hmacFail.Load(), MalformedWire: b.malformedWire.Load(), UnknownSession: b.unknownSession.Load(), DataDuplicate: b.dataDuplicate.Load(), Pending: uint64(pending), Backlog: uint64(len(b.tx)), Retransmits: b.retransmits.Load(), PendingExpired: b.pendingExpired.Load(), PendingOverflow: b.pendingOverflow.Load(), FastPromotions: b.fastPromotions.Load(), FastDemotions: b.fastDemotions.Load(), FastHealthy: b.fastHealthy.Load(), PullActive: b.pullActive.Load(), CompatActive: b.compatActive.Load(), TxErrors: b.txErrors.Load()}
+	return RuntimeStats{
+		SocketReceiveBytes: b.socketReceiveBytes.Load(),
+		SocketSendBytes: b.socketSendBytes.Load(),
+		ControlTxBytes: b.controlTxBytes.Load(),
+		DataWireTxBytes: b.dataWireTxBytes.Load(),
+		PulledDataRx: b.pulledDataRx.Load(),
+		PullRepliesRx: b.pullRepliesRx.Load(),
+		PullOutstanding: b.pullOutstanding.Load(),
+		PullRequestsExpired: b.pullRequestsExpired.Load(),
+		PullBudgetPPS: math.Float64frombits(b.pullBudgetPPS.Load()),
+		PeerAuthenticated: b.peerID.Load() != 0,
+		PeerSilenceMS: b.peerSilenceMS.Load(),
+		RehandshakeTries: b.rehandshakeTries.Load(),
+		PathSuspended: b.pathSuspended.Load(),
+		FastRetransmits: b.fastRetries.Load(),
+		ReorderBuffered: b.rxBuffered.Load(),
+		WireTxBytes: b.wireTxBytes.Load(),
+		WireRxBytes: b.wireRxBytes.Load(),
+		FastDataTx: b.fastDataTx.Load(),
+		PullDataTx: b.pullDataTx.Load(),
+		CompatDataTx: b.compatDataTx.Load(),
+		IdleProbeTx: b.idleProbeTx.Load(),
+		FastProbeTx: b.fastProbeTx.Load(),
+		FastAckTx: b.fastAckTx.Load(),
+		NeedPullTx: b.needPullTx.Load(),
+		PullProbeTx: b.pullProbeTx.Load(),
+		FastAckRx: b.fastAckRx.Load(),
+		NeedPullRx: b.needPullRx.Load(),
+		PullProbeRx: b.pullProbeRx.Load(),
+		ReflectionsSuppressed: b.reflectionsSuppressed.Load(),
+		PayloadFrameRx: b.payloadFrameRx.Load(),
+		HMACFail: b.hmacFail.Load(),
+		MalformedWire: b.malformedWire.Load(),
+		UnknownSession: b.unknownSession.Load(),
+		DataDuplicate: b.dataDuplicate.Load(),
+		Pending: uint64(pending),
+		Backlog: uint64(len(b.tx)),
+		Retransmits: b.retransmits.Load(),
+		PendingExpired: b.pendingExpired.Load(),
+		PendingOverflow: b.pendingOverflow.Load(),
+		FastPromotions: b.fastPromotions.Load(),
+		FastDemotions: b.fastDemotions.Load(),
+		FastHealthy: b.fastHealthy.Load(),
+		PullActive: b.pullActive.Load(),
+		CompatActive: b.compatActive.Load(),
+		TxErrors: b.txErrors.Load(),
+	}
 }

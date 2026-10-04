@@ -20,6 +20,15 @@ type Carrier interface {
 // RuntimeStats is optional carrier telemetry used by the engine's periodic
 // status line. Counters are cumulative for the current transport instance.
 type RuntimeStats struct {
+	SocketReceiveBytes int64 `json:"socket_receive_bytes"`
+	SocketSendBytes int64 `json:"socket_send_bytes"`
+	ControlTxBytes uint64 `json:"control_tx_bytes"`
+	DataWireTxBytes uint64 `json:"data_wire_tx_bytes"`
+	PulledDataRx        uint64  `json:"pulled_data_rx"`
+	PullRepliesRx       uint64  `json:"pull_replies_rx"`
+	PullOutstanding     uint64  `json:"pull_outstanding"`
+	PullRequestsExpired uint64  `json:"pull_requests_expired"`
+	PullBudgetPPS       float64 `json:"pull_budget_pps"`
 	WireTxBytes uint64 `json:"wire_tx_bytes"`
 	WireRxBytes uint64 `json:"wire_rx_bytes"`
 

@@ -93,6 +93,19 @@ class RC5ManagerTests(unittest.TestCase):
     self.assertEqual(m.peer_health('ggs01'),'STALE TELEMETRY')
    m.atomic(self.root/'ggs01.json','{broken')
    self.assertEqual(m.peer_health('ggs01'),'HEALTH UNKNOWN')
+ def test_existing_bip_defaults_preserve_larger_buffers_and_other_transports(self):
+  small=m.make_config(1,'bip','198.51.100.10','203.0.113.20',24001,'a'*64,'server')
+  large=copy.deepcopy(small);large['tun']['name']='ggs02';large['transport']['sock_buf']=16<<20
+  small['transport']['sock_buf']=212992;small['tuner']['unlimited_rate']=False
+  tcp=self.cfg(3);original=copy.deepcopy(tcp)
+  with patch.object(m,'configs',return_value={'ggs01':small,'ggs02':large,'ggs03':tcp}),patch.object(m,'save_config') as save,contextlib.redirect_stdout(io.StringIO()):
+   m.optimize_existing()
+  self.assertEqual(save.call_count,2)
+  self.assertEqual(small['transport']['sock_buf'],4<<20)
+  self.assertEqual(large['transport']['sock_buf'],16<<20)
+  self.assertTrue(small['tuner']['unlimited_rate'])
+  self.assertEqual(tcp,original)
+  self.assertTrue(all(call.args[1] for call in save.call_args_list))
  def test_every_menu_option_dispatches(self):
   route={'1':'create_server','2':'join_client','3':'status','9':'edit','10':'delete','11':'encode_join',
          '12':'run_logs','13':'diagnose','14':'capacity','15':'capacity','16':'tune','17':'tune',

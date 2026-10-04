@@ -322,15 +322,22 @@ func (e *Engine) statsLoop(ctx context.Context) {
 		interval = 5 * time.Second
 	}
 	t := time.NewTicker(interval)
+	// Engine counters survive transport recovery. Start this sampling epoch at
+	// the current totals instead of attributing process history to one interval.
+	lastAt := time.Now()
+	lastTxPackets, lastRxPackets := e.txPackets.Load(), e.rxPackets.Load()
+	lastTxBytes, lastRxBytes := e.txBytes.Load(), e.rxBytes.Load()
+	var lastWireTx, lastWireRx uint64
+	if s, ok := e.carrier.(carrier.Statser); ok {
+		cs := s.SnapshotStats()
+		lastWireTx, lastWireRx = cs.WireTxBytes, cs.WireRxBytes
+	}
 	if e.cfg.Telemetry.StatsFile != "" {
 		if err := writeTelemetry(e.cfg.Telemetry.StatsFile, e.SnapshotTelemetry(time.Now())); err != nil {
 			log.Printf("stats file: %v", err)
 		}
 	}
 	defer t.Stop()
-	lastAt := time.Now()
-	var lastTxPackets, lastRxPackets, lastTxBytes, lastRxBytes uint64
-	var lastWireTx, lastWireRx uint64
 	for {
 		select {
 		case now := <-t.C:
@@ -355,6 +362,8 @@ func (e *Engine) statsLoop(ctx context.Context) {
 					cs.FastAckRx, cs.NeedPullRx, cs.PullProbeRx, cs.ReflectionsSuppressed, cs.PayloadFrameRx, cs.HMACFail, cs.DataDuplicate,
 					cs.Pending, cs.Backlog, cs.Retransmits, cs.PendingExpired, cs.PendingOverflow, cs.FastPromotions, cs.FastDemotions, cs.FastHealthy, cs.PullActive, cs.CompatActive, cs.TxErrors)
 				lastWireTx, lastWireRx = cs.WireTxBytes, cs.WireRxBytes
+				base += fmt.Sprintf(" pull_feedback{data_rx=%d replies=%d outstanding=%d expired=%d budget=%.0fpps}",
+					cs.PulledDataRx, cs.PullRepliesRx, cs.PullOutstanding, cs.PullRequestsExpired, cs.PullBudgetPPS)
 				base += fmt.Sprintf(" health{authenticated=%t silent=%dms suspended=%t rehandshake=%d}",
 					cs.PeerAuthenticated, cs.PeerSilenceMS, cs.PathSuspended, cs.RehandshakeTries)
 			}

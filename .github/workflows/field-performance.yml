@@ -1,0 +1,89 @@
+name: Field performance repairs
+on:
+  workflow_call:
+  push:
+    branches: [fix/bip-silent-recovery]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: field-performance-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Cloud formatting patch
+        run: |
+          gofmt -w cmd internal
+          git diff --binary -- cmd internal > gofmt.patch
+          cat gofmt.patch
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then test ! -s gofmt.patch; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: field-format
+          path: gofmt.patch
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Format only in cloud and retain patch
+        run: |
+          mkdir -p field-artifacts
+          gofmt -w cmd internal
+          git diff --binary -- cmd internal > field-artifacts/gofmt.patch
+      - name: Vet race and audit
+        run: |
+          go vet ./...
+          go test -race -tags audit -short -count=1 -timeout 5m ./...
+          go test -race ./internal/carrier -run '^TestPullFeedback' -count=5 -timeout 2m -v | tee field-artifacts/pull-regression.log
+      - name: Prove historical-rate regression on rc1
+        run: |
+          BASE=$(mktemp -d)
+          git archive v0.3.1-rc1 | tar -x -C "$BASE"
+          cp internal/engine/stats_recovery_test.go "$BASE/internal/engine/"
+          set +e
+          (cd "$BASE" && go test ./internal/engine -run '^TestStatsRecoveryDoesNotCountHistoricalTrafficAsRate$' -count=1 -timeout 10s -v) > field-artifacts/stats-baseline.log 2>&1
+          result=$?
+          set -e
+          cat field-artifacts/stats-baseline.log
+          test "$result" -ne 0
+          grep -q 'counted historical traffic' field-artifacts/stats-baseline.log
+      - name: Build installer and manager checks
+        run: |
+          bash scripts/build-release.sh
+          python3 scripts/check_version.py
+          python3 -m unittest discover -s scripts -p 'test_*.py' -v
+          sudo env GITHUB_ACTIONS=true python3 scripts/smoke_systemd.py
+      - name: Real field-pattern comparison
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool
+          BASE=$(mktemp -d)
+          git archive v0.3.1-rc1 | tar -x -C "$BASE"
+          (cd "$BASE" && bash scripts/build-release.sh)
+          sudo env GITHUB_ACTIONS=true GGS_FIELD_BASE="$BASE" python3 scripts/field_performance.py
+          cp extended-results/field-results.jsonl field-artifacts/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: field-performance-${{ matrix.runner }}
+          path: |
+            field-artifacts/
+            extended-results/
