@@ -373,7 +373,7 @@ func (b *BIP) fail(err error) {
 		b.cancel()
 	}
 }
-func (b *BIP) readLoop(ctx context.Context) {
+func (b *BIP) readLoopScalar(ctx context.Context) {
 	buf := make([]byte, 65535)
 	for {
 		_ = b.recv.SetReadDeadline(time.Now().Add(time.Second))
