@@ -27,7 +27,7 @@ if field:
     if len(field)!=56 or len(candidates)!=28 or any(r['status']!='pass' for r in candidates):
         raise SystemExit('Missing or failed tagged field observations')
     notes+='\n## Directional field-pattern A/B checks\n\n'
-    notes+='56 retained observations (28 rc1, 28 candidate), 16 TCP streams, 80ms RTT, 10 measured seconds after 2s warm-up. Impaired passes require progress, not 100Mbps. Full raw observations and failure history are in field-performance-results.tar.gz.\n\n'
+    notes+='56 retained observations (28 rc1, 28 candidate), 16 TCP streams, 80ms RTT, 10 measured seconds after 2s warm-up. Clean/asymmetric/stateful candidate floors: 100Mbps on 200Mbps links and 200Mbps on 500Mbps links; PPS-policed floor: 30Mbps. Both versions use host socket ceilings >=16MiB. Full raw observations for this tagged run are in field-performance-results.tar.gz; earlier failed experiments are documented separately.\n\n'
     notes+='| Arch | Case | Link Mbps | Direction | Version | Received Mbps | Iran PULL probe pps | Status |\n|---|---|---:|---|---|---:|---:|---|\n'
     for r in field:
         direction='reverse' if r['reverse'] else 'forward'

@@ -52,7 +52,12 @@ func (b *BIP) pollingRate(now time.Time, active bool) float64 {
 		p.activeSince = time.Time{}
 	} else if p.activeSince.IsZero() {
 		p.activeSince = now
-		p.rate = 1000
+		// Short MORE/NEED_PULL gaps must not restart a healthy receiving rate
+		// at 1000pps on every inner TCP ACK burst. Stale high rates restart
+		// conservatively, while unanswered low-rate discovery stays bounded.
+		if p.rate == 0 || (p.rate > 1000 && now.Sub(p.lastReply) >= grace) {
+			p.rate = 1000
+		}
 	}
 	if elapsed := now.Sub(p.sampleAt); elapsed >= 100*time.Millisecond {
 		// Empty probes have no protocol response. Bound their retained tuples

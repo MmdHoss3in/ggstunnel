@@ -84,18 +84,18 @@ func TestPullFeedbackRequiresAuthenticatedCorrelatedUniqueDATA(t *testing.T) {
 		t.Fatal("unauthenticated DATA consumed poll feedback")
 	}
 	b.handle(body, now.Add(time.Millisecond))
-	b.handle(body, now.Add(2 * time.Millisecond))
+	b.handle(body, now.Add(2*time.Millisecond))
 	p.number = 2
 	body, _ = b.encode(p)
-	b.handle(body, now.Add(3 * time.Millisecond))
+	b.handle(body, now.Add(3*time.Millisecond))
 	// FAST with a coincident tuple is DATA, not a PULL response.
 	p.number, p.token, p.tuple, p.flags = 3, 2, 2, 0
 	body, _ = b.encode(p)
-	b.handle(body, now.Add(4 * time.Millisecond))
+	b.handle(body, now.Add(4*time.Millisecond))
 	// A late/unmatched pulled frame must still be delivered normally.
 	p.number, p.token, p.tuple, p.flags = 4, 3, 99, bipFlagPulled
 	body, _ = b.encode(p)
-	b.handle(body, now.Add(5 * time.Millisecond))
+	b.handle(body, now.Add(5*time.Millisecond))
 	s := b.SnapshotStats()
 	if b.poll.accepted != 1 || s.PullRepliesRx != 1 || s.PulledDataRx != 2 || s.PayloadFrameRx != 3 || len(b.poll.requests) != 1 {
 		t.Fatalf("feedback bypassed authentication, correlation or unique retention: %+v", s)

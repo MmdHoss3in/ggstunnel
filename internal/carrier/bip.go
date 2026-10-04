@@ -1115,6 +1115,13 @@ func (b *BIP) run(ctx context.Context) {
 				}
 			}
 			remotePull := now.Before(b.remotePullUntil)
+			// A pending PULL-delivered flight normally produces return traffic
+			// (including inner TCP ACKs). Keep return request tuples available
+			// rather than waiting another RTT for NEED_PULL on every ACK burst.
+			b.ackMu.Lock()
+			pullReturn := !fast && len(b.pending) > 0 && !b.lastPull.IsZero() && now.Sub(b.lastPull) < time.Second
+			b.ackMu.Unlock()
+			remotePull = remotePull || pullReturn
 			b.pullActive.Store(remotePull)
 			pullRate := b.pollingRate(now, remotePull)
 			if now.Sub(b.lastIdle) >= time.Duration(b.cfg.Transport.BIPProbeMS)*time.Millisecond {

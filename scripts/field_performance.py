@@ -45,7 +45,10 @@ def main():
     base = Path(os.environ['GGS_FIELD_BASE']) / 'dist' / ('ggstunnel-linux-' + ARCH)
     failures = []
     rows = []
-    for mode in ('clean', 'asymmetric', 'stateful', 'pps'):
+    modes = (os.environ['GGS_FIELD_MODE'],) if os.environ.get('GGS_FIELD_MODE') else ('clean', 'asymmetric', 'stateful', 'pps')
+    if any(mode not in ('clean', 'asymmetric', 'stateful', 'pps') for mode in modes):
+        raise ValueError('Unknown field case')
+    for mode in modes:
         for rate in ((200,) if mode == 'pps' else (200, 500)):
             for reverse in (False, True):
                 versions = [('rc1', base), ('candidate', BIN)]

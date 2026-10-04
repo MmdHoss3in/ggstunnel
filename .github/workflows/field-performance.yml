@@ -33,6 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        mode: [clean, asymmetric, stateful, pps]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
@@ -65,6 +66,15 @@ jobs:
           cat field-artifacts/stats-baseline.log
           test "$result" -ne 0
           grep -q 'counted historical traffic' field-artifacts/stats-baseline.log
+          cp internal/carrier/bip_integration_test.go internal/carrier/strict_stateful_test.go "$BASE/internal/carrier/"
+          set +e
+          (cd "$BASE" && go test ./internal/carrier -run '^(TestBIPSingleReplyStatefulHandshake|TestFASTReplyRetriesAvoidBlockedRequestDirection)$' -count=1 -timeout 15s -v) > field-artifacts/path-baseline.log 2>&1
+          result=$?
+          set -e
+          cat field-artifacts/path-baseline.log
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestBIPSingleReplyStatefulHandshake' field-artifacts/path-baseline.log
+          grep -q -- '--- FAIL: TestFASTReplyRetriesAvoidBlockedRequestDirection' field-artifacts/path-baseline.log
       - name: Build installer and manager checks
         run: |
           bash scripts/build-release.sh
@@ -78,12 +88,12 @@ jobs:
           BASE=$(mktemp -d)
           git archive v0.3.1-rc1 | tar -x -C "$BASE"
           (cd "$BASE" && bash scripts/build-release.sh)
-          sudo env GITHUB_ACTIONS=true GGS_FIELD_BASE="$BASE" python3 scripts/field_performance.py
+          sudo env GITHUB_ACTIONS=true GGS_FIELD_BASE="$BASE" GGS_FIELD_MODE='${{ matrix.mode }}' python3 scripts/field_performance.py
           cp extended-results/field-results.jsonl field-artifacts/
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: field-performance-${{ matrix.runner }}
+          name: field-performance-${{ matrix.runner }}-${{ matrix.mode }}
           path: |
             field-artifacts/
             extended-results/
