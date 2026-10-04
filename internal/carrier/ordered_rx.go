@@ -24,7 +24,9 @@ func (b *BIP) receiveOrderedPayload(seq uint32, payload []byte, packed bool) boo
 	}
 	b.rxHold[seq] = append([]byte(nil), payload...)
 	if packed {
-		if b.rxPacked == nil { b.rxPacked = make(map[uint32]int) }
+		if b.rxPacked == nil {
+			b.rxPacked = make(map[uint32]int)
+		}
 		b.rxPacked[seq] = 1
 	}
 	b.rxBuffered.Store(uint64(len(b.rxHold)))
@@ -45,12 +47,15 @@ func (b *BIP) drainRX() {
 		next := len(payload)
 		if packed {
 			size := int(binary.BigEndian.Uint16(payload[offset:]))
-			next = offset+2+size
-			frame = payload[offset+2:next]
+			next = offset + 2 + size
+			frame = payload[offset+2 : next]
 		}
 		select {
 		case b.rx <- frame:
-			if packed && next < len(payload) { b.rxPacked[b.rxNext] = next; continue }
+			if packed && next < len(payload) {
+				b.rxPacked[b.rxNext] = next
+				continue
+			}
 			delete(b.rxHold, b.rxNext)
 			delete(b.rxPacked, b.rxNext)
 			b.rxBuffered.Store(uint64(len(b.rxHold)))

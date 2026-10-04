@@ -61,7 +61,7 @@ var ErrBIPDeliveryTimeout = errors.New("BIP delivery timeout")
 var ErrBIPPeerUnresponsive = errors.New("BIP peer unresponsive")
 
 type outData struct {
-	flags byte
+	flags   byte
 	data    []byte
 	seq     uint32
 	retries int
@@ -106,14 +106,14 @@ type PacketIO interface {
 }
 
 type BIP struct {
-	allowPacking bool
-	peerPackSupport bool
-	packetPacking atomic.Bool
-	lastPackOffer time.Time
-	heldTX []byte
-	heldTXPresent atomic.Bool
-	rxPacked map[uint32]int
-	packedDataTx, packedFramesTx, packedDataRx, packedFramesRx atomic.Uint64
+	allowPacking                                                                                     bool
+	peerPackSupport                                                                                  bool
+	packetPacking                                                                                    atomic.Bool
+	lastPackOffer                                                                                    time.Time
+	heldTX                                                                                           []byte
+	heldTXPresent                                                                                    atomic.Bool
+	rxPacked                                                                                         map[uint32]int
+	packedDataTx, packedFramesTx, packedDataRx, packedFramesRx                                       atomic.Uint64
 	incomingBatches                                                                                  chan [][]byte
 	socketReceiveBytes, socketSendBytes                                                              atomic.Int64
 	controlTxBytes, dataWireTxBytes                                                                  atomic.Uint64
@@ -340,7 +340,7 @@ func (b *BIP) Start(ctx context.Context) error {
 		return syscall.Sendto(fd, w, 0, sa)
 	}
 	b.batchEmit = func(packets [][]byte) (int, error) { return sendBIPMessages(fd, packets, b.peer) }
-	b.allowPacking = true
+	b.allowPacking = os.Getenv("GGS_BIP_PACKET_PACKING") != "0"
 	child := b.startActor(ctx)
 	b.workers.Add(1)
 	go func() { defer b.workers.Done(); b.readLoop(child) }()
@@ -1001,10 +1001,15 @@ func (b *BIP) handle(body []byte, now time.Time) {
 			if !b.receiveOrderedPayload(p.token, p.payload, packed) {
 				b.pendingOverflow.Add(1)
 			} else {
-				if packed { b.packedDataRx.Add(1); b.packedFramesRx.Add(uint64(parts)) }
+				if packed {
+					b.packedDataRx.Add(1)
+					b.packedFramesRx.Add(uint64(parts))
+				}
 				if p.flags&bipFlagPulled != 0 {
 					b.pulledDataRx.Add(1)
-					if matchedPull { b.poll.accepted++ }
+					if matchedPull {
+						b.poll.accepted++
+					}
 				}
 			}
 		}
@@ -1046,9 +1051,14 @@ func (b *BIP) deliverOne(typ byte, id, tuple uint16, mode byte, now time.Time) {
 		return
 	}
 	p, packed, count := b.takeTXPayload()
-	if p == nil { return }
+	if p == nil {
+		return
+	}
 	x := outData{data: p, seq: b.nextDataSeq(), flags: packed}
-	if packed != 0 { b.packedDataTx.Add(1); b.packedFramesTx.Add(uint64(count)) }
+	if packed != 0 {
+		b.packedDataTx.Add(1)
+		b.packedFramesTx.Add(uint64(count))
+	}
 	b.queuePending(x, mode, now)
 	flags := x.flags
 	if mode == pendingModePull {
@@ -1500,11 +1510,11 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 	pending := len(b.pending)
 	b.ackMu.Unlock()
 	return RuntimeStats{
-		PeerPacketPacking: b.packetPacking.Load(),
-		PackedDataTx: b.packedDataTx.Load(),
-		PackedFramesTx: b.packedFramesTx.Load(),
-		PackedDataRx: b.packedDataRx.Load(),
-		PackedFramesRx: b.packedFramesRx.Load(),
+		PeerPacketPacking:     b.packetPacking.Load(),
+		PackedDataTx:          b.packedDataTx.Load(),
+		PackedFramesTx:        b.packedFramesTx.Load(),
+		PackedDataRx:          b.packedDataRx.Load(),
+		PackedFramesRx:        b.packedFramesRx.Load(),
 		KernelEchoFilter:      b.kernelEchoFilter.Load(),
 		SocketReceiveBytes:    b.socketReceiveBytes.Load(),
 		SocketSendBytes:       b.socketSendBytes.Load(),

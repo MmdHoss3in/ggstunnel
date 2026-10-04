@@ -1,0 +1,11 @@
+name: Pre-publication full validation
+on:
+  push:
+    branches: [fix/bip-silent-recovery]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  extended:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[cloud-matrix]')
+    uses: ./.github/workflows/extended.yml

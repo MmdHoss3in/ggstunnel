@@ -20,11 +20,11 @@ type Carrier interface {
 // RuntimeStats is optional carrier telemetry used by the engine's periodic
 // status line. Counters are cumulative for the current transport instance.
 type RuntimeStats struct {
-	PeerPacketPacking bool `json:"peer_packet_packing"`
-	PackedDataTx uint64 `json:"packed_data_tx"`
-	PackedFramesTx uint64 `json:"packed_frames_tx"`
-	PackedDataRx uint64 `json:"packed_data_rx"`
-	PackedFramesRx uint64 `json:"packed_frames_rx"`
+	PeerPacketPacking   bool    `json:"peer_packet_packing"`
+	PackedDataTx        uint64  `json:"packed_data_tx"`
+	PackedFramesTx      uint64  `json:"packed_frames_tx"`
+	PackedDataRx        uint64  `json:"packed_data_rx"`
+	PackedFramesRx      uint64  `json:"packed_frames_rx"`
 	KernelEchoFilter    bool    `json:"kernel_echo_filter"`
 	SocketReceiveBytes  int64   `json:"socket_receive_bytes"`
 	SocketSendBytes     int64   `json:"socket_send_bytes"`

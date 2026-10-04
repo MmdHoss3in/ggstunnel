@@ -1,7 +1,5 @@
 name: PULL CPU diagnostics
 on:
-  push:
-    branches: [fix/bip-silent-recovery]
   workflow_dispatch:
 permissions:
   contents: read
