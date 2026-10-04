@@ -104,6 +104,7 @@ type PacketIO interface {
 }
 
 type BIP struct {
+	incomingBatches chan [][]byte
 	socketReceiveBytes, socketSendBytes                                                              atomic.Int64
 	controlTxBytes, dataWireTxBytes                                                                  atomic.Uint64
 	poll                                                                                             pullPoller
@@ -209,6 +210,7 @@ func NewBIP(c *config.Config) (Carrier, error) {
 		return nil, err
 	}
 	b := &BIP{tuner: newBIPTuner(c), cfg: c, local: l, peer: p, localID: sid, master: master, gate: g, rawfd: -1, id: binary.BigEndian.Uint16(seed[8:]), tx: make(chan []byte, c.Performance.QueueSize), rx: make(chan []byte, c.Performance.QueueSize), incoming: make(chan []byte, c.Performance.QueueSize), errors: make(chan error, 1), pending: make(map[uint32]*pendingData), rxAck: sackWindow{init: true, seen: make(map[uint32]bool)}, replay: frame.NewReplayGuard(65536)}
+	b.incomingBatches = make(chan [][]byte, max(1, c.Performance.QueueSize/16))
 	b.closed = make(chan struct{})
 	b.txReady = make(chan struct{}, 1)
 	// The retransmission window and the unsent backlog serve different
@@ -1073,6 +1075,8 @@ func (b *BIP) run(ctx context.Context) {
 			return
 		case p := <-b.incoming:
 			b.processIncomingBatch(ctx, p)
+		case packets := <-b.incomingBatches:
+			b.processNativeBatch(ctx, packets)
 		case <-b.txReady:
 			b.pumpFast(time.Now())
 		case <-tick.C:
@@ -1266,6 +1270,16 @@ func (b *BIP) processIncomingBatch(ctx context.Context, p []byte) {
 		default:
 			return
 		}
+	}
+}
+// Native receive already completed these datagrams. Hand them to the actor as
+// one bounded event so its first reply cannot race the reader's next enqueue
+// and turn a completed receive batch back into single-packet send syscalls.
+func (b *BIP) processNativeBatch(ctx context.Context, packets [][]byte) {
+	for _, p := range packets {
+		if ctx.Err() != nil { return }
+		b.handle(p, time.Now())
+		b.pumpFast(time.Now())
 	}
 }
 func (b *BIP) flushDataBatch() {

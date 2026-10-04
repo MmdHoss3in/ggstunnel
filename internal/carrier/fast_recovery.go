@@ -127,9 +127,10 @@ func (b *BIP) recoverPersistentHole(ack uint32, bits uint64, payload []byte, wid
 	if highest == 0 {
 		return
 	}
-	for seq, p := range b.pending {
+	visit := func(seq uint32, p *pendingData) {
+		if p == nil { return }
 		if p.item.retries == 0 || p.fast || p.index < 0 || now.Sub(p.sent) < guard || !seqAfter(seq, ack) || sequenceDistance(ack, seq) >= highest {
-			continue
+			return
 		}
 		p.sacked++
 		if p.sacked >= 3 && now.Before(p.deadline) {
@@ -137,5 +138,17 @@ func (b *BIP) recoverPersistentHole(ack uint32, bits uint64, payload []byte, wid
 			heap.Fix(&b.retryHeap, p.index)
 			b.nextPullRetryCheck = time.Time{}
 		}
+	}
+	// A narrow SACK range cannot describe holes elsewhere in a large flight.
+	// Avoid scanning thousands of unrelated pending frames on every control or
+	// DATA packet; use the cheaper of the advertised range and retained flight.
+	if highest-1 < uint32(len(b.pending)) {
+		seq := ack
+		for offset := uint32(1); offset < highest; offset++ {
+			seq = nextSequence(seq)
+			visit(seq, b.pending[seq])
+		}
+	} else {
+		for seq, p := range b.pending { visit(seq, p) }
 	}
 }

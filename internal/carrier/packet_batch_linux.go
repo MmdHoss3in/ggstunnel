@@ -146,6 +146,7 @@ func (b *BIP) readLoopBatch(ctx context.Context) error {
 		if receiveErr != nil {
 			return receiveErr
 		}
+		packets := make([][]byte, 0, count)
 		for i := 0; i < count; i++ {
 			n := int(batch.msg[i].length)
 			if batch.msg[i].header.Flags&syscall.MSG_TRUNC != 0 || n < 20 || n > len(batch.data[i]) {
@@ -160,14 +161,15 @@ func (b *BIP) readLoopBatch(ctx context.Context) error {
 			if len(body) < 72 || len(body) > 1480 || string(body[8:12]) != bipMagic {
 				continue
 			}
-			p := append([]byte(nil), body...)
-			select {
-			case b.incoming <- p:
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-				b.pendingOverflow.Add(1)
-			}
+			packets = append(packets, append([]byte(nil), body...))
+		}
+		if len(packets) == 0 { continue }
+		select {
+		case b.incomingBatches <- packets:
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			b.pendingOverflow.Add(uint64(len(packets)))
 		}
 	}
 }
