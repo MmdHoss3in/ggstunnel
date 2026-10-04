@@ -67,6 +67,11 @@ def main():
                             result = pair.finish_iperf(*pair.iperf('10.77.1.2', 10, 2, reverse, 16), 45)
                             time.sleep(1.1)
                             after = pair.sample(); elapsed = time.monotonic() - began
+                            row['cpu_cores_used'] = [round((b.get('cpu_sec', 0)-a.get('cpu_sec', 0))/elapsed, 3)
+                                                     for a, b in zip(before['peers'], after['peers'])]
+                            row['end_snapshot'] = after
+                            row['router_qdiscs'] = [json.loads(run('ip', 'netns', 'exec', pair.router, 'tc', '-j', '-s', 'qdisc', 'show', 'dev', dev).stdout)
+                                                    for dev in pair.router_devs]
                             feedback = []
                             for a, b in zip(before['peers'], after['peers']):
                                 initial = a.get('telemetry', {}).get('carrier', {})

@@ -1,0 +1,55 @@
+name: PULL CPU diagnostics
+on:
+  push:
+    branches: [fix/bip-silent-recovery]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Build separately instrumented diagnostic executable
+        run: |
+          mkdir -p field-artifacts
+          cat > cmd/ggstunnel/field_profile.go <<'EOF'
+          package main
+          import ("fmt"; "os"; "runtime/pprof"; "time")
+          func init() {
+            if dir := os.Getenv("GGS_FIELD_PROFILE"); dir != "" {
+              f, err := os.Create(fmt.Sprintf("%s/cpu-%d.pprof", dir, os.Getpid()))
+              if err != nil { panic(err) }
+              if err = pprof.StartCPUProfile(f); err != nil { panic(err) }
+              go func() { time.Sleep(10*time.Second); pprof.StopCPUProfile(); f.Close() }()
+            }
+          }
+          EOF
+          gofmt -w cmd/ggstunnel/field_profile.go
+          bash scripts/build-release.sh
+          BASE=$(mktemp -d)
+          git archive v0.3.1-rc1 | tar -x -C "$BASE"
+          (cd "$BASE" && bash scripts/build-release.sh)
+          echo "GGS_FIELD_BASE=$BASE" >> "$GITHUB_ENV"
+      - name: Collect diagnostic evidence without treating this binary as release validation
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool
+          sudo env GITHUB_ACTIONS=true GGS_FIELD_BASE="$GGS_FIELD_BASE" GGS_FIELD_MODE=stateful GGS_FIELD_PROFILE="$PWD/field-artifacts" python3 scripts/field_performance.py || true
+          for file in field-artifacts/*.pprof; do
+            go tool pprof -top -nodecount=25 dist/ggstunnel-linux-amd64 "$file"
+          done | tee field-artifacts/cpu-top.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pull-cpu-diagnostic
+          path: |
+            field-artifacts/
+            extended-results/
