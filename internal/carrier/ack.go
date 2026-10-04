@@ -17,6 +17,9 @@ func (b *BIP) scheduleAck(p wirePacket, now time.Time, immediate bool) {
 }
 
 func (b *BIP) flushAck(now time.Time) {
+	if b.ackType == 8 {
+		b.ackID, b.ackTuple = b.nextTuple()
+	}
 	if err := b.send(b.ackType, b.ackID, b.ackTuple, bipKindAck, 0, 0, nil, b.active); err != nil {
 		b.ackDue = now.Add(time.Duration(b.cfg.Transport.BIPAckMS) * time.Millisecond)
 		return

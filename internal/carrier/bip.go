@@ -786,10 +786,19 @@ func responseType(p wirePacket) byte {
 	}
 	return 8
 }
+
+func (b *BIP) sendResponse(p wirePacket, kind, flags byte, token uint32, payload []byte, target uint64) error {
+	typ, id, tuple := responseType(p), p.id, p.tuple
+	if typ == 8 {
+		id, tuple = b.nextTuple()
+	}
+	return b.send(typ, id, tuple, kind, flags, token, payload, target)
+}
+
 func (b *BIP) issueChallenge(p wirePacket, now time.Time) {
 	c, err := b.gate.Issue(p.sender, b.remoteRole(), now)
 	if err == nil {
-		_ = b.send(responseType(p), p.id, p.tuple, bipKindChallenge, 0, 0, marshalChallenge(c), p.sender)
+		_ = b.sendResponse(p, bipKindChallenge, 0, 0, marshalChallenge(c), p.sender)
 	}
 }
 func (b *BIP) handle(body []byte, now time.Time) {
@@ -843,7 +852,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 			if b.cfg.Performance.QueueSize >= bipWideSpan {
 				capability = bipFlagWideSACK
 			}
-			_ = b.send(responseType(p), p.id, p.tuple, bipKindProof, capability, 0, payload, p.sender)
+			_ = b.sendResponse(p, bipKindProof, capability, 0, payload, p.sender)
 			if b.active != p.sender {
 				b.issueChallenge(p, now)
 			}
@@ -877,7 +886,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 					b.publishTuner(now)
 				}
 			}
-			_ = b.send(responseType(p), p.id, p.tuple, bipKindReady, 0, 0, nil, p.sender)
+			_ = b.sendResponse(p, bipKindReady, 0, 0, nil, p.sender)
 		case bipKindReady: // READY never authorizes a session reset.
 		}
 		return
@@ -900,7 +909,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 	switch p.kind {
 	case bipKindFastProbe:
 		b.fastAckTx.Add(1)
-		_ = b.send(responseType(p), p.id, p.tuple, bipKindFastAck, 0, p.token, nil, b.active)
+		_ = b.sendResponse(p, bipKindFastAck, 0, p.token, nil, b.active)
 	case bipKindFastAck:
 		if p.token != 0 && p.token == b.fastToken && now.Before(b.fastDeadline) {
 			if !now.Before(b.fastUntil) {
@@ -917,7 +926,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 		// works. Confirm this authenticated request so silence suspension does
 		// not prevent the first compatibility DATA from discovering that path.
 		// ACKs do not authorize a reset and never elicit another ACK.
-		_ = b.send(responseType(p), p.id, p.tuple, bipKindAck, 0, 0, nil, b.active)
+		_ = b.sendResponse(p, bipKindAck, 0, 0, nil, b.active)
 	case bipKindPullProbe:
 		b.pullProbeRx.Add(1)
 		b.lastPull = now
@@ -1181,11 +1190,15 @@ func (b *BIP) run(ctx context.Context) {
 				if pd.fast {
 					b.fastRetries.Add(1)
 				}
-				b.queuePending(pd.item, pendingModeRequest, now)
+				typ, mode := byte(8), byte(pendingModeRequest)
+				if fast {
+					typ, mode = 0, pendingModeFast
+				}
+				b.queuePending(pd.item, mode, now)
 				id, s := b.nextTuple()
 				// DATA loss is congestion evidence, not proof the FAST path died.
 				// Path probes/TTL independently decide when to fall back.
-				_ = b.send(8, id, s, bipKindData, bipFlagMore, pd.item.seq, pd.item.data, b.active)
+				_ = b.send(typ, id, s, bipKindData, bipFlagMore, pd.item.seq, pd.item.data, b.active)
 			}
 			if (fast || compat) && !suspended {
 				quota := b.cfg.Tuner.MaxBurst

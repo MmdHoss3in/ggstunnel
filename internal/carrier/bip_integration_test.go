@@ -33,6 +33,7 @@ type simLink struct {
 	reorder          bool
 	requests         map[[3]uint16]time.Time
 	stateful         bool
+	singleReply      bool
 }
 
 func (l *simLink) emit(from int, w []byte) error {
@@ -48,6 +49,9 @@ func (l *simLink) emit(from int, w []byte) error {
 		created, ok := l.requests[[3]uint16{uint16(1 - from), id, seq}]
 		if !ok || time.Since(created) > time.Second {
 			return nil
+		}
+		if l.singleReply {
+			delete(l.requests, [3]uint16{uint16(1 - from), id, seq})
 		}
 	}
 	if l.filter != nil && !l.filter(from, body) {

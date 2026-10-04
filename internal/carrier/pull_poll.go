@@ -98,7 +98,10 @@ func (b *BIP) pollingRate(now time.Time, active bool) float64 {
 
 func (b *BIP) sendPullProbe(now time.Time) bool {
 	p := &b.poll
-	if len(p.requests) >= b.window() {
+	// Polls include empty requests as well as DATA in flight. A DATA-sized
+	// request limit would become an accidental rate cap when empty probes
+	// await expiry. Keep bounded headroom separate from the reliable flight.
+	if len(p.requests) >= 4*b.window() {
 		return false
 	}
 	if p.requests == nil {

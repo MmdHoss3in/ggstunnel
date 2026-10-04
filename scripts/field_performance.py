@@ -16,8 +16,10 @@ def firewall(pair, mode):
             '--icmp-type', 'echo-request', '-m', 'u32', '--u32',
             '0>>22&0x3C@12>>24=1:6', '-j', 'DROP')
     elif mode == 'stateful':
-        for name in pair.names:
-            run('ip', 'netns', 'exec', name, 'sysctl', '-qw', 'net.ipv4.icmp_echo_ignore_all=1')
+        # Make both versions exercise PULL. Legacy reused cross-direction
+        # identifiers can otherwise let FAST probes match stale conntrack.
+        run(*router, '-A', 'FORWARD', '-p', 'icmp', '--icmp-type', 'echo-reply',
+            '-m', 'u32', '--u32', '0>>22&0x3C@12>>24=1', '-j', 'DROP')
         run(*router, '-A', 'FORWARD', '-p', 'icmp', '--icmp-type', 'echo-reply',
             '-m', 'conntrack', '--ctstate', 'INVALID,NEW', '-j', 'DROP')
     elif mode == 'pps':
@@ -34,6 +36,12 @@ def main():
     if os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true':
         raise RuntimeError('Disposable privileged GitHub Actions runner required')
     OUT.mkdir(exist_ok=True)
+    # Same ceilings as menu option 16; both A/B versions receive the same host
+    # resources. Do not disable kernel echo globally: that also disables the
+    # inner TUN ping used to establish application reachability.
+    for key in ('net.core.rmem_max', 'net.core.wmem_max'):
+        current = int(run('sysctl', '-n', key).stdout.strip())
+        run('sysctl', '-qw', f'{key}={max(current, 16<<20)}')
     base = Path(os.environ['GGS_FIELD_BASE']) / 'dist' / ('ggstunnel-linux-' + ARCH)
     failures = []
     rows = []
@@ -71,7 +79,7 @@ def main():
                                        [a['pid'] for a in before['peers']] == [b['pid'] for b in after['peers']])
                             row['internal_recoveries'] = [b.get('telemetry', {}).get('internal_recoveries', 0)-a.get('telemetry', {}).get('internal_recoveries', 0)
                                                           for a, b in zip(before['peers'], after['peers'])]
-                            floor = 100 if mode == 'clean' else 1
+                            floor = (100 if rate == 200 else 200) if mode in ('clean', 'asymmetric', 'stateful') else 30
                             row['status'] = 'pass' if result['received_mbps'] >= floor and row['processes_unchanged'] and not any(row['internal_recoveries']) else 'fail'
                             if label == 'candidate' and mode == 'asymmetric' and feedback[0]['pull_probe_pps'] > 200:
                                 row['status'] = 'fail'; row['reason'] = 'Unanswered PULL overhead exceeded 200pps average'
@@ -83,7 +91,7 @@ def main():
                     print(json.dumps(row), flush=True)
                     with (OUT / 'field-results.jsonl').open('a') as f: f.write(json.dumps(row)+'\n')
                     if label == 'candidate' and row['status'] != 'pass': failures.append(row)
-                if mode == 'clean' and all('received_mbps' in samples[x] for x in ('rc1', 'candidate')):
+                if mode in ('clean', 'stateful') and all('received_mbps' in samples[x] for x in ('rc1', 'candidate')):
                     if samples['candidate']['received_mbps'] < .65*samples['rc1']['received_mbps']:
                         failures.append(dict(case=mode, link_mbps=rate, reverse=reverse, reason='Clean A/B regression >35%'))
     (OUT / 'field-summary.json').write_text(json.dumps(dict(rows=rows, failures=failures), indent=2))

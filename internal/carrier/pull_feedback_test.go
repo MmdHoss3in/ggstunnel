@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"ggstunnel/internal/config"
+	"ggstunnel/internal/frame"
 )
 
 func TestPullFeedbackDoesNotFollowFASTOrCOMPAT(t *testing.T) {
@@ -50,15 +51,61 @@ func TestPullFeedbackRequestMemoryAndExpiryBound(t *testing.T) {
 	for i := 0; i < 10000; i++ {
 		b.sendPullProbe(now)
 	}
-	if len(b.poll.requests) != b.window() {
-		t.Fatal("poll tuples are not bounded by the negotiated window")
+	if len(b.poll.requests) != 512 {
+		t.Fatal("poll tuples are not bounded to four 128-frame windows")
 	}
 	b.pollingRate(now.Add(2*time.Second), true)
-	if len(b.poll.requests) != 0 || b.SnapshotStats().PullRequestsExpired != uint64(b.window()) {
+	if len(b.poll.requests) != 0 || b.SnapshotStats().PullRequestsExpired != 512 {
 		t.Fatal("unanswered requests retained")
 	}
 	if !b.sendPullProbe(now.Add(2 * time.Second)) {
 		t.Fatal("expiry blocked rediscovery")
+	}
+}
+
+func TestPullFeedbackRequiresAuthenticatedCorrelatedUniqueDATA(t *testing.T) {
+	b := testBIP(t)
+	b.active = 8
+	b.replay = frame.NewReplayGuard(65536)
+	b.rxAck.init = true
+	now := time.Now()
+	b.poll.requests = map[uint32]time.Time{pullTuple(9, 1): now, pullTuple(9, 2): now}
+	p := wirePacket{typ: 0, kind: bipKindData, flags: bipFlagPulled, id: 9, tuple: 1, sender: 8, target: b.localID, number: 1, token: 1, payload: []byte("first")}
+	body, err := b.encode(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := append([]byte(nil), body...)
+	bad[len(bad)-1] ^= 1
+	binary.BigEndian.PutUint16(bad[2:4], 0)
+	binary.BigEndian.PutUint16(bad[2:4], checksum(bad))
+	b.handle(bad, now)
+	if b.poll.accepted != 0 || len(b.poll.requests) != 2 {
+		t.Fatal("unauthenticated DATA consumed poll feedback")
+	}
+	b.handle(body, now.Add(time.Millisecond))
+	b.handle(body, now.Add(2 * time.Millisecond))
+	p.number = 2
+	body, _ = b.encode(p)
+	b.handle(body, now.Add(3 * time.Millisecond))
+	// FAST with a coincident tuple is DATA, not a PULL response.
+	p.number, p.token, p.tuple, p.flags = 3, 2, 2, 0
+	body, _ = b.encode(p)
+	b.handle(body, now.Add(4 * time.Millisecond))
+	// A late/unmatched pulled frame must still be delivered normally.
+	p.number, p.token, p.tuple, p.flags = 4, 3, 99, bipFlagPulled
+	body, _ = b.encode(p)
+	b.handle(body, now.Add(5 * time.Millisecond))
+	s := b.SnapshotStats()
+	if b.poll.accepted != 1 || s.PullRepliesRx != 1 || s.PulledDataRx != 2 || s.PayloadFrameRx != 3 || len(b.poll.requests) != 1 {
+		t.Fatalf("feedback bypassed authentication, correlation or unique retention: %+v", s)
+	}
+	for i := 0; i < 3; i++ {
+		select {
+		case <-b.Recv():
+		default:
+			t.Fatal("late or unmatched DATA was lost")
+		}
 	}
 }
 
