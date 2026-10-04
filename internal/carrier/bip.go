@@ -104,7 +104,7 @@ type PacketIO interface {
 }
 
 type BIP struct {
-	incomingBatches chan [][]byte
+	incomingBatches                                                                                  chan [][]byte
 	socketReceiveBytes, socketSendBytes                                                              atomic.Int64
 	controlTxBytes, dataWireTxBytes                                                                  atomic.Uint64
 	poll                                                                                             pullPoller
@@ -1272,12 +1272,15 @@ func (b *BIP) processIncomingBatch(ctx context.Context, p []byte) {
 		}
 	}
 }
+
 // Native receive already completed these datagrams. Hand them to the actor as
 // one bounded event so its first reply cannot race the reader's next enqueue
 // and turn a completed receive batch back into single-packet send syscalls.
 func (b *BIP) processNativeBatch(ctx context.Context, packets [][]byte) {
 	for _, p := range packets {
-		if ctx.Err() != nil { return }
+		if ctx.Err() != nil {
+			return
+		}
 		b.handle(p, time.Now())
 		b.pumpFast(time.Now())
 	}

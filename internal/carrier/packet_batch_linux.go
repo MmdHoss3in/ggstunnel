@@ -163,7 +163,9 @@ func (b *BIP) readLoopBatch(ctx context.Context) error {
 			}
 			packets = append(packets, append([]byte(nil), body...))
 		}
-		if len(packets) == 0 { continue }
+		if len(packets) == 0 {
+			continue
+		}
 		select {
 		case b.incomingBatches <- packets:
 		case <-ctx.Done():

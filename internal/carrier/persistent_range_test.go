@@ -17,6 +17,8 @@ func TestPersistentHoleNarrowRangeAcrossWrap(t *testing.T) {
 	}
 	for seq, p := range b.pending {
 		want := seq == 0xfffffffe || seq == 0xffffffff
-		if p.fast != want { t.Fatalf("persistent recovery crossed advertised range at %08x", seq) }
+		if p.fast != want {
+			t.Fatalf("persistent recovery crossed advertised range at %08x", seq)
+		}
 	}
 }

@@ -128,7 +128,9 @@ func (b *BIP) recoverPersistentHole(ack uint32, bits uint64, payload []byte, wid
 		return
 	}
 	visit := func(seq uint32, p *pendingData) {
-		if p == nil { return }
+		if p == nil {
+			return
+		}
 		if p.item.retries == 0 || p.fast || p.index < 0 || now.Sub(p.sent) < guard || !seqAfter(seq, ack) || sequenceDistance(ack, seq) >= highest {
 			return
 		}
@@ -149,6 +151,8 @@ func (b *BIP) recoverPersistentHole(ack uint32, bits uint64, payload []byte, wid
 			visit(seq, b.pending[seq])
 		}
 	} else {
-		for seq, p := range b.pending { visit(seq, p) }
+		for seq, p := range b.pending {
+			visit(seq, p)
+		}
 	}
 }
