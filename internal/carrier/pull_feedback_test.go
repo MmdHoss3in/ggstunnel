@@ -27,8 +27,10 @@ func TestPullFeedbackDoesNotFollowFASTOrCOMPAT(t *testing.T) {
 	}
 	// A correlated response restores growth despite local FAST being healthy.
 	b.fastHealthy.Store(true)
-	b.poll.requests = map[uint32]time.Time{pullTuple(9, 1): now.Add(2500*time.Millisecond)}
-	if !b.poll.reply(9, 1, now.Add(2510*time.Millisecond)) { t.Fatal("valid return rejected") }
+	b.poll.requests = map[uint32]time.Time{pullTuple(9, 1): now.Add(2500 * time.Millisecond)}
+	if !b.poll.reply(9, 1, now.Add(2510*time.Millisecond)) {
+		t.Fatal("valid return rejected")
+	}
 	b.poll.accepted += 100
 	if rate := b.pollingRate(now.Add(2600*time.Millisecond), true); rate < 1000 {
 		t.Fatalf("PULL did not rediscover the returning direction: %f", rate)
@@ -45,13 +47,19 @@ func TestPullFeedbackRequestMemoryAndExpiryBound(t *testing.T) {
 	b.emit = func([]byte) error { return nil }
 	now := time.Now()
 	b.pollingRate(now, true)
-	for i := 0; i < 10000; i++ { b.sendPullProbe(now) }
-	if len(b.poll.requests) != b.window() { t.Fatal("poll tuples are not bounded by the negotiated window") }
+	for i := 0; i < 10000; i++ {
+		b.sendPullProbe(now)
+	}
+	if len(b.poll.requests) != b.window() {
+		t.Fatal("poll tuples are not bounded by the negotiated window")
+	}
 	b.pollingRate(now.Add(2*time.Second), true)
 	if len(b.poll.requests) != 0 || b.SnapshotStats().PullRequestsExpired != uint64(b.window()) {
 		t.Fatal("unanswered requests retained")
 	}
-	if !b.sendPullProbe(now.Add(2*time.Second)) { t.Fatal("expiry blocked rediscovery") }
+	if !b.sendPullProbe(now.Add(2 * time.Second)) {
+		t.Fatal("expiry blocked rediscovery")
+	}
 }
 
 func TestPullFeedbackAsymmetricContinuousTraffic(t *testing.T) {
@@ -63,8 +71,12 @@ func TestPullFeedbackAsymmetricContinuousTraffic(t *testing.T) {
 	began := time.Now()
 	l.filter = func(from int, p []byte) bool {
 		if from == 0 && time.Since(began) > 2*time.Second {
-			if p[12] == bipKindPullProbe { latePolls++ }
-			if p[12] == bipKindData { lateData++ }
+			if p[12] == bipKindPullProbe {
+				latePolls++
+			}
+			if p[12] == bipKindData {
+				lateData++
+			}
 		}
 		return from != 0 || p[0] != 8 || p[12] >= bipKindHello
 	}
@@ -77,8 +89,11 @@ func TestPullFeedbackAsymmetricContinuousTraffic(t *testing.T) {
 		go func(e *BIP) {
 			defer workers.Done()
 			for seq := uint32(1); ; seq++ {
-				packet := make([]byte, 1200); binary.BigEndian.PutUint32(packet, seq)
-				if e.SendContext(ctx, packet) != nil { return }
+				packet := make([]byte, 1200)
+				binary.BigEndian.PutUint32(packet, seq)
+				if e.SendContext(ctx, packet) != nil {
+					return
+				}
 			}
 		}(endpoint)
 		go func(i int, e *BIP) {
@@ -88,16 +103,26 @@ func TestPullFeedbackAsymmetricContinuousTraffic(t *testing.T) {
 				select {
 				case packet := <-e.Recv():
 					seq := binary.BigEndian.Uint32(packet)
-					if seq != previous+1 { t.Errorf("direction %d reordered or corrupted DATA: %d after %d", i, seq, previous); return }
-					previous = seq; counts[i]++
-				case <-ctx.Done(): return
+					if seq != previous+1 {
+						t.Errorf("direction %d reordered or corrupted DATA: %d after %d", i, seq, previous)
+						return
+					}
+					previous = seq
+					counts[i]++
+				case <-ctx.Done():
+					return
 				}
 			}
 		}(i, endpoint)
 	}
-	time.Sleep(4*time.Second)
-	cancel(); workers.Wait(); a.Close(); b.Close()
-	l.mu.Lock(); polls, data := latePolls, lateData; l.mu.Unlock()
+	time.Sleep(4 * time.Second)
+	cancel()
+	workers.Wait()
+	a.Close()
+	b.Close()
+	l.mu.Lock()
+	polls, data := latePolls, lateData
+	l.mu.Unlock()
 	if counts[0] < 500 || counts[1] < 500 || data < 500 || polls > 250 {
 		t.Fatalf("asymmetric progress/poll budget: delivered=%v late_data=%d late_polls=%d", counts, data, polls)
 	}

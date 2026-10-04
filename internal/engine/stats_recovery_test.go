@@ -13,10 +13,13 @@ import (
 	"ggstunnel/internal/config"
 )
 
-type statsLogSink struct { lines chan string }
+type statsLogSink struct{ lines chan string }
 
 func (s *statsLogSink) Write(p []byte) (int, error) {
-	select { case s.lines <- string(p): default: }
+	select {
+	case s.lines <- string(p):
+	default:
+	}
 	return len(p), nil
 }
 
@@ -38,8 +41,14 @@ func TestStatsRecoveryDoesNotCountHistoricalTrafficAsRate(t *testing.T) {
 		go func() { defer close(done); e.statsLoop(ctx) }()
 		deadline := time.Now().Add(time.Second)
 		for {
-			if _, err := os.Stat(e.cfg.Telemetry.StatsFile); err == nil { break }
-			if time.Now().After(deadline) { cancel(); <-done; t.Fatal("initial telemetry not written") }
+			if _, err := os.Stat(e.cfg.Telemetry.StatsFile); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				cancel()
+				<-done
+				t.Fatal("initial telemetry not written")
+			}
 			time.Sleep(time.Millisecond)
 		}
 		e.txBytes.Add(1_000_000)
@@ -48,16 +57,21 @@ func TestStatsRecoveryDoesNotCountHistoricalTrafficAsRate(t *testing.T) {
 		e.rxPackets.Add(200)
 		select {
 		case line := <-sink.lines:
-			cancel(); <-done
+			cancel()
+			<-done
 			at := strings.Index(line, "rate{tx=")
-			if at < 0 { t.Fatal(line) }
+			if at < 0 {
+				t.Fatal(line)
+			}
 			var tx, tp, rx, rp float64
 			_, err := fmt.Sscanf(line[at:], "rate{tx=%fMbps/%fpps rx=%fMbps/%fpps}", &tx, &tp, &rx, &rp)
 			if err != nil || tx < 7.5 || tx > 8.5 || rx < 15 || rx > 17 || tp < 95 || tp > 105 || rp < 190 || rp > 210 {
 				t.Fatalf("epoch %d counted historical traffic or wrong interval: %s (%v)", epoch, line, err)
 			}
-		case <-time.After(3*time.Second):
-			cancel(); <-done; t.Fatal("no stats sample")
+		case <-time.After(3 * time.Second):
+			cancel()
+			<-done
+			t.Fatal("no stats sample")
 		}
 	}
 }

@@ -104,11 +104,11 @@ type PacketIO interface {
 }
 
 type BIP struct {
-	socketReceiveBytes, socketSendBytes atomic.Int64
-	controlTxBytes, dataWireTxBytes atomic.Uint64
-	poll pullPoller
-	pulledDataRx, pullRepliesRx, pullOutstanding, pullRequestsExpired atomic.Uint64
-	pullBudgetPPS atomic.Uint64
+	socketReceiveBytes, socketSendBytes                                                              atomic.Int64
+	controlTxBytes, dataWireTxBytes                                                                  atomic.Uint64
+	poll                                                                                             pullPoller
+	pulledDataRx, pullRepliesRx, pullOutstanding, pullRequestsExpired                                atomic.Uint64
+	pullBudgetPPS                                                                                    atomic.Uint64
 	txReady                                                                                          chan struct{}
 	lossFlightEnd                                                                                    uint32
 	lossFlightSet                                                                                    bool
@@ -1347,50 +1347,50 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 	pending := len(b.pending)
 	b.ackMu.Unlock()
 	return RuntimeStats{
-		SocketReceiveBytes: b.socketReceiveBytes.Load(),
-		SocketSendBytes: b.socketSendBytes.Load(),
-		ControlTxBytes: b.controlTxBytes.Load(),
-		DataWireTxBytes: b.dataWireTxBytes.Load(),
-		PulledDataRx: b.pulledDataRx.Load(),
-		PullRepliesRx: b.pullRepliesRx.Load(),
-		PullOutstanding: b.pullOutstanding.Load(),
-		PullRequestsExpired: b.pullRequestsExpired.Load(),
-		PullBudgetPPS: math.Float64frombits(b.pullBudgetPPS.Load()),
-		PeerAuthenticated: b.peerID.Load() != 0,
-		PeerSilenceMS: b.peerSilenceMS.Load(),
-		RehandshakeTries: b.rehandshakeTries.Load(),
-		PathSuspended: b.pathSuspended.Load(),
-		FastRetransmits: b.fastRetries.Load(),
-		ReorderBuffered: b.rxBuffered.Load(),
-		WireTxBytes: b.wireTxBytes.Load(),
-		WireRxBytes: b.wireRxBytes.Load(),
-		FastDataTx: b.fastDataTx.Load(),
-		PullDataTx: b.pullDataTx.Load(),
-		CompatDataTx: b.compatDataTx.Load(),
-		IdleProbeTx: b.idleProbeTx.Load(),
-		FastProbeTx: b.fastProbeTx.Load(),
-		FastAckTx: b.fastAckTx.Load(),
-		NeedPullTx: b.needPullTx.Load(),
-		PullProbeTx: b.pullProbeTx.Load(),
-		FastAckRx: b.fastAckRx.Load(),
-		NeedPullRx: b.needPullRx.Load(),
-		PullProbeRx: b.pullProbeRx.Load(),
+		SocketReceiveBytes:    b.socketReceiveBytes.Load(),
+		SocketSendBytes:       b.socketSendBytes.Load(),
+		ControlTxBytes:        b.controlTxBytes.Load(),
+		DataWireTxBytes:       b.dataWireTxBytes.Load(),
+		PulledDataRx:          b.pulledDataRx.Load(),
+		PullRepliesRx:         b.pullRepliesRx.Load(),
+		PullOutstanding:       b.pullOutstanding.Load(),
+		PullRequestsExpired:   b.pullRequestsExpired.Load(),
+		PullBudgetPPS:         math.Float64frombits(b.pullBudgetPPS.Load()),
+		PeerAuthenticated:     b.peerID.Load() != 0,
+		PeerSilenceMS:         b.peerSilenceMS.Load(),
+		RehandshakeTries:      b.rehandshakeTries.Load(),
+		PathSuspended:         b.pathSuspended.Load(),
+		FastRetransmits:       b.fastRetries.Load(),
+		ReorderBuffered:       b.rxBuffered.Load(),
+		WireTxBytes:           b.wireTxBytes.Load(),
+		WireRxBytes:           b.wireRxBytes.Load(),
+		FastDataTx:            b.fastDataTx.Load(),
+		PullDataTx:            b.pullDataTx.Load(),
+		CompatDataTx:          b.compatDataTx.Load(),
+		IdleProbeTx:           b.idleProbeTx.Load(),
+		FastProbeTx:           b.fastProbeTx.Load(),
+		FastAckTx:             b.fastAckTx.Load(),
+		NeedPullTx:            b.needPullTx.Load(),
+		PullProbeTx:           b.pullProbeTx.Load(),
+		FastAckRx:             b.fastAckRx.Load(),
+		NeedPullRx:            b.needPullRx.Load(),
+		PullProbeRx:           b.pullProbeRx.Load(),
 		ReflectionsSuppressed: b.reflectionsSuppressed.Load(),
-		PayloadFrameRx: b.payloadFrameRx.Load(),
-		HMACFail: b.hmacFail.Load(),
-		MalformedWire: b.malformedWire.Load(),
-		UnknownSession: b.unknownSession.Load(),
-		DataDuplicate: b.dataDuplicate.Load(),
-		Pending: uint64(pending),
-		Backlog: uint64(len(b.tx)),
-		Retransmits: b.retransmits.Load(),
-		PendingExpired: b.pendingExpired.Load(),
-		PendingOverflow: b.pendingOverflow.Load(),
-		FastPromotions: b.fastPromotions.Load(),
-		FastDemotions: b.fastDemotions.Load(),
-		FastHealthy: b.fastHealthy.Load(),
-		PullActive: b.pullActive.Load(),
-		CompatActive: b.compatActive.Load(),
-		TxErrors: b.txErrors.Load(),
+		PayloadFrameRx:        b.payloadFrameRx.Load(),
+		HMACFail:              b.hmacFail.Load(),
+		MalformedWire:         b.malformedWire.Load(),
+		UnknownSession:        b.unknownSession.Load(),
+		DataDuplicate:         b.dataDuplicate.Load(),
+		Pending:               uint64(pending),
+		Backlog:               uint64(len(b.tx)),
+		Retransmits:           b.retransmits.Load(),
+		PendingExpired:        b.pendingExpired.Load(),
+		PendingOverflow:       b.pendingOverflow.Load(),
+		FastPromotions:        b.fastPromotions.Load(),
+		FastDemotions:         b.fastDemotions.Load(),
+		FastHealthy:           b.fastHealthy.Load(),
+		PullActive:            b.pullActive.Load(),
+		CompatActive:          b.compatActive.Load(),
+		TxErrors:              b.txErrors.Load(),
 	}
 }

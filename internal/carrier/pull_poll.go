@@ -8,11 +8,11 @@ import (
 // Actor-owned feedback for the receiving direction. Local FAST health says
 // nothing about whether the peer needs EchoRequest tuples to return its DATA.
 type pullPoller struct {
-	requests map[uint32]time.Time
-	rate float64
-	rtt time.Duration
+	requests                         map[uint32]time.Time
+	rate                             float64
+	rtt                              time.Duration
 	sampleAt, activeSince, lastReply time.Time
-	accepted, sampled, expired uint64
+	accepted, sampled, expired       uint64
 }
 
 func pullTuple(id, tuple uint16) uint32 {
@@ -28,7 +28,11 @@ func (p *pullPoller) reply(id, tuple uint16, now time.Time) bool {
 	delete(p.requests, key)
 	p.lastReply = now
 	if sample := now.Sub(sent); sample > 0 {
-		if p.rtt == 0 { p.rtt = sample } else { p.rtt = (7*p.rtt+sample)/8 }
+		if p.rtt == 0 {
+			p.rtt = sample
+		} else {
+			p.rtt = (7*p.rtt + sample) / 8
+		}
 	}
 	return true
 }
@@ -90,13 +94,6 @@ func (b *BIP) pollingRate(now time.Time, active bool) float64 {
 	b.pullOutstanding.Store(uint64(len(p.requests)))
 	b.pullRequestsExpired.Store(p.expired)
 	return rate
-}
-
-func maxTime(a, b time.Time) time.Time {
-	if b.After(a) {
-		return b
-	}
-	return a
 }
 
 func (b *BIP) sendPullProbe(now time.Time) bool {
