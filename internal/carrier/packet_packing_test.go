@@ -83,7 +83,7 @@ func TestPacketPackingPartialReceiveRetainsEveryFrameOnce(t *testing.T) {
 	}
 }
 
-func TestPacketPackingRequiresAcknowledgementOfCurrentPeerCapability(t *testing.T) {
+func TestPacketPackingRequiresCurrentPeerCapability(t *testing.T) {
 	b := packingFixture(t)
 	b.packetPacking.Store(false)
 	b.peerPackSupport = false
@@ -95,8 +95,8 @@ func TestPacketPackingRequiresAcknowledgementOfCurrentPeerCapability(t *testing.
 		t.Fatal("stale/legacy READY enabled new wire format")
 	}
 	b.handlePackReady(wirePacket{typ: 8, sender: 8, target: b.localID, payload: packOffer})
-	if b.packetPacking.Load() || !b.peerPackSupport {
-		t.Fatal("offer bypassed reciprocal acknowledgement")
+	if !b.packetPacking.Load() || !b.peerPackSupport {
+		t.Fatal("verified peer receive capability was not enabled")
 	}
 	b.handlePackReady(wirePacket{typ: 0, sender: 8, target: b.localID, payload: packAccept})
 	if !b.packetPacking.Load() {
@@ -174,8 +174,10 @@ func TestMalformedPackedDATADoesNotACKOrConsumePullRequest(t *testing.T) {
 	b.poll.requests = map[uint32]time.Time{pullTuple(31, 5): now}
 	invalid := [][]byte{{17}, {2, 0, 1, 7, 0, 0}, {2, 0, 1, 7}, {2, 255, 255}}
 	for i, payload := range invalid {
-		wire, err := b.encode(wirePacket{typ: 0, kind: bipKindData, flags: bipFlagPacked | bipFlagPulled, sender: 8, target: b.localID, number: uint64(i+1), id: 31, tuple: 5, token: 1, payload: payload})
-		if err != nil { t.Fatal(err) }
+		wire, err := b.encode(wirePacket{typ: 0, kind: bipKindData, flags: bipFlagPacked | bipFlagPulled, sender: 8, target: b.localID, number: uint64(i + 1), id: 31, tuple: 5, token: 1, payload: payload})
+		if err != nil {
+			t.Fatal(err)
+		}
 		b.handle(wire, now)
 	}
 	if len(b.poll.requests) != 1 || b.rxAck.max != 0 || len(b.rxHold) != 0 || b.payloadFrameRx.Load() != 0 || b.malformedWire.Load() != uint64(len(invalid)) {
@@ -195,9 +197,70 @@ func TestPackedReceiveAcrossSequenceWrap(t *testing.T) {
 		t.Fatal("packed receive stalled across sequence zero")
 	}
 	for i := byte(1); i <= 4; i++ {
-		if got := <-b.rx; len(got) != 1 || got[0] != i { t.Fatal("packed receive reordered across wrap") }
+		if got := <-b.rx; len(got) != 1 || got[0] != i {
+			t.Fatal("packed receive reordered across wrap")
+		}
 	}
-	if b.rxNext != 2 || len(b.rxPacked) != 0 { t.Fatal("packed wrap retained stale metadata") }
+	if b.rxNext != 2 || len(b.rxPacked) != 0 {
+		t.Fatal("packed wrap retained stale metadata")
+	}
+}
+
+func TestPacketPackingCapabilityWithOneRequestDirectionBlocked(t *testing.T) {
+	for _, from := range []int{0, 1} {
+		a, b := packingFixture(t), packingFixture(t)
+		a.localID, a.active = 7, 8
+		b.localID, b.active = 8, 7
+		a.packetPacking.Store(false)
+		b.packetPacking.Store(false)
+		a.peerPackSupport = false
+		b.peerPackSupport = false
+		now := time.Now()
+		a.emit = func(w []byte) error {
+			if w[20] != 8 {
+				b.handle(append([]byte(nil), w[20:]...), now)
+			}
+			return nil
+		}
+		b.emit = func(w []byte) error {
+			a.handle(append([]byte(nil), w[20:]...), now)
+			return nil
+		}
+		if from == 0 {
+			_ = a.send(0, 31, 5, bipKindReady, 0, 0, packOffer, b.localID)
+		} else {
+			_ = b.send(8, 31, 5, bipKindReady, 0, 0, packOffer, a.localID)
+		}
+		if !a.packetPacking.Load() || !b.packetPacking.Load() {
+			t.Fatal("packing capability required a blocked originated request")
+		}
+	}
+}
+
+func TestPackedDATAOvertakesReverseCapability(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		b := packingFixture(t)
+		b.tx <- []byte{1}
+		b.tx <- []byte{2}
+		payload, flags, _ := b.takeTXPayload()
+		b.allowPacking = enabled
+		b.packetPacking.Store(false)
+		b.peerPackSupport = false
+		b.replay = frame.NewReplayGuard(65536)
+		b.emit = func([]byte) error { return nil }
+		wire, err := b.encode(wirePacket{typ: 8, kind: bipKindData, flags: flags, sender: b.active, target: b.localID, number: 1, id: 31, tuple: 5, token: 1, payload: payload})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.handle(wire, time.Now())
+		if enabled {
+			if len(b.rx) != 2 || b.rxAck.max != 1 || b.packedFramesRx.Load() != 2 || b.packetPacking.Load() {
+				t.Fatal("DATA overtaking READY was dropped or enabled unadvertised TX")
+			}
+		} else if len(b.rx) != 0 || b.rxAck.max != 0 || b.malformedWire.Load() != 1 {
+			t.Fatal("local packing opt-out accepted packed DATA")
+		}
+	}
 }
 
 func FuzzPackedFrameBounds(f *testing.F) {

@@ -980,7 +980,10 @@ func (b *BIP) handle(body []byte, now time.Time) {
 		if packed {
 			var valid bool
 			parts, valid = validatePacked(p.payload, b.cfg.Performance.MaxFramePayload+60)
-			if !b.allowPacking || !b.peerPackSupport || !valid {
+			// Active-peer authentication and local support are sufficient for RX.
+			// DATA can overtake READY; requiring a reverse capability exchange
+			// here would drop valid bundles on an asymmetric request path.
+			if !b.allowPacking || !valid {
 				b.malformedWire.Add(1)
 				return
 			}

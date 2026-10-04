@@ -7,7 +7,7 @@ import (
 
 // READY's payload was ignored by older BIP5 implementations. Keep its old
 // flags and shape; never send a new DATA flag until a verified active peer
-// explicitly acknowledges this offer. Each nested frame retains its original
+// advertises or confirms receive support. Each nested frame retains its original
 // independent AEAD nonce, sender identity, packet ID and replay sequence.
 var packOffer = []byte("GGS-PACK1-OFFER")
 var packAccept = []byte("GGS-PACK1-ACCEPT")
@@ -26,6 +26,7 @@ func (b *BIP) handlePackReady(p wirePacket) {
 	switch {
 	case bytes.Equal(p.payload, packOffer):
 		b.peerPackSupport = true
+		b.packetPacking.Store(true)
 		_ = b.sendResponse(p, bipKindReady, 0, 0, packAccept, b.active)
 	case bytes.Equal(p.payload, packAccept):
 		b.peerPackSupport = true
