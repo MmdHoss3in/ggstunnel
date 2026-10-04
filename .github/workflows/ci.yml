@@ -36,6 +36,7 @@ jobs:
         run: |
           go test ./internal/carrier -run '^$' -fuzz '^FuzzBIPWireParser$' -fuzztime 10s
           go test ./internal/carrier -run '^$' -fuzz '^FuzzTunerEventBounds$' -fuzztime 10s
+          go test ./internal/carrier -run '^$' -fuzz '^FuzzPackedFrameBounds$' -fuzztime 10s
           go test ./internal/frame -run '^$' -fuzz '^FuzzFrameParser$' -fuzztime 10s
       - name: Build release binaries
         run: bash scripts/build-release.sh

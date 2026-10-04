@@ -39,6 +39,7 @@ const (
 	bipKindReady     byte = 10
 	bipFlagMore      byte = 1
 	bipFlagPulled    byte = 2
+	bipFlagPacked    byte = 4
 	// MORE is ignored on legacy PROOF packets. Its authenticated use there
 	// advertises wide SACK without introducing a flag old parsers reject.
 	bipFlagWideSACK    byte = bipFlagMore
@@ -60,6 +61,7 @@ var ErrBIPDeliveryTimeout = errors.New("BIP delivery timeout")
 var ErrBIPPeerUnresponsive = errors.New("BIP peer unresponsive")
 
 type outData struct {
+	flags byte
 	data    []byte
 	seq     uint32
 	retries int
@@ -104,6 +106,14 @@ type PacketIO interface {
 }
 
 type BIP struct {
+	allowPacking bool
+	peerPackSupport bool
+	packetPacking atomic.Bool
+	lastPackOffer time.Time
+	heldTX []byte
+	heldTXPresent atomic.Bool
+	rxPacked map[uint32]int
+	packedDataTx, packedFramesTx, packedDataRx, packedFramesRx atomic.Uint64
 	incomingBatches                                                                                  chan [][]byte
 	socketReceiveBytes, socketSendBytes                                                              atomic.Int64
 	controlTxBytes, dataWireTxBytes                                                                  atomic.Uint64
@@ -330,6 +340,7 @@ func (b *BIP) Start(ctx context.Context) error {
 		return syscall.Sendto(fd, w, 0, sa)
 	}
 	b.batchEmit = func(packets [][]byte) (int, error) { return sendBIPMessages(fd, packets, b.peer) }
+	b.allowPacking = true
 	child := b.startActor(ctx)
 	b.workers.Add(1)
 	go func() { defer b.workers.Done(); b.readLoop(child) }()
@@ -699,7 +710,7 @@ func (b *BIP) retryOnPull(id, tuple uint16, now time.Time) bool {
 		b.fastRetries.Add(1)
 	}
 	b.queuePending(oldest.item, pendingModePull, now)
-	_ = b.send(0, id, tuple, bipKindData, bipFlagMore|bipFlagPulled, oldest.item.seq, oldest.item.data, b.active)
+	_ = b.send(0, id, tuple, bipKindData, bipFlagMore|bipFlagPulled|oldest.item.flags, oldest.item.seq, oldest.item.data, b.active)
 	return true
 }
 func (b *BIP) SnapshotTuner() TunerSnapshot {
@@ -740,6 +751,10 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.ackCount = 0
 	b.rxAck = sackWindow{init: true, seen: make(map[uint32]bool)}
 	b.rxHold = nil
+	b.rxPacked = nil
+	b.packetPacking.Store(false)
+	b.peerPackSupport = false
+	b.lastPackOffer = time.Time{}
 	b.rxNext = 1
 	b.rxBuffered.Store(0)
 	b.ackMu.Unlock()
@@ -906,8 +921,10 @@ func (b *BIP) handle(body []byte, now time.Time) {
 					b.publishTuner(now)
 				}
 			}
-			_ = b.sendResponse(p, bipKindReady, 0, 0, nil, p.sender)
-		case bipKindReady: // READY never authorizes a session reset.
+			_ = b.sendResponse(p, bipKindReady, 0, 0, b.packOfferPayload(), p.sender)
+			b.lastPackOffer = now
+		case bipKindReady: // Capability exchange never authorizes a session reset.
+			b.handlePackReady(p)
 		}
 		return
 	}
@@ -958,6 +975,16 @@ func (b *BIP) handle(body []byte, now time.Time) {
 		if len(p.payload) == 0 || p.token == 0 {
 			return
 		}
+		packed := p.flags&bipFlagPacked != 0
+		parts := 1
+		if packed {
+			var valid bool
+			parts, valid = validatePacked(p.payload, b.cfg.Performance.MaxFramePayload+60)
+			if !b.allowPacking || !b.peerPackSupport || !valid {
+				b.malformedWire.Add(1)
+				return
+			}
+		}
 		// A valid session packet is not necessarily a response to our polling.
 		// Only a pulled EchoReply with an outstanding tuple is feedback.
 		matchedPull := p.typ == 0 && p.flags&bipFlagPulled != 0 && b.poll.reply(p.id, p.tuple, now)
@@ -971,12 +998,13 @@ func (b *BIP) handle(body []byte, now time.Time) {
 			w.dirty = true
 			b.dataDuplicate.Add(1)
 		} else if sequenceDistance(w.max, p.token) <= uint32(b.window()) {
-			if !b.receiveOrdered(p.token, p.payload) {
+			if !b.receiveOrderedPayload(p.token, p.payload, packed) {
 				b.pendingOverflow.Add(1)
-			} else if p.flags&bipFlagPulled != 0 {
-				b.pulledDataRx.Add(1)
-				if matchedPull {
-					b.poll.accepted++
+			} else {
+				if packed { b.packedDataRx.Add(1); b.packedFramesRx.Add(uint64(parts)) }
+				if p.flags&bipFlagPulled != 0 {
+					b.pulledDataRx.Add(1)
+					if matchedPull { b.poll.accepted++ }
 				}
 			}
 		}
@@ -1011,25 +1039,22 @@ func (b *BIP) deliverOne(typ byte, id, tuple uint16, mode byte, now time.Time) {
 	if full {
 		return
 	}
-	if len(b.tx) == 0 {
+	if b.txBacklog() == 0 {
 		return
 	}
 	if b.tuner != nil && !b.tuner.allow(now, true) {
 		return
 	}
-	var p []byte
-	select {
-	case p = <-b.tx:
-	default:
-		return
-	}
-	x := outData{data: p, seq: b.nextDataSeq()}
+	p, packed, count := b.takeTXPayload()
+	if p == nil { return }
+	x := outData{data: p, seq: b.nextDataSeq(), flags: packed}
+	if packed != 0 { b.packedDataTx.Add(1); b.packedFramesTx.Add(uint64(count)) }
 	b.queuePending(x, mode, now)
-	flags := byte(0)
+	flags := x.flags
 	if mode == pendingModePull {
 		flags |= bipFlagPulled
 	}
-	if len(b.tx) > 0 && !(mode == pendingModePull && b.fastHealthy.Load()) {
+	if b.txBacklog() > 0 && !(mode == pendingModePull && b.fastHealthy.Load()) {
 		flags |= bipFlagMore
 	}
 	_ = b.send(typ, id, tuple, bipKindData, flags, x.seq, x.data, b.active)
@@ -1056,7 +1081,7 @@ func (b *BIP) pumpFast(now time.Time) {
 	if b.active == 0 || !now.Before(b.fastUntil) || b.pathUnresponsive(now) {
 		return
 	}
-	for i := 0; i < b.cfg.Tuner.MaxBurst && len(b.tx) > 0; i++ {
+	for i := 0; i < b.cfg.Tuner.MaxBurst && b.txBacklog() > 0; i++ {
 		previous := b.dataSeq
 		id, s := b.nextTuple()
 		b.deliverOne(0, id, s, pendingModeFast, now)
@@ -1105,6 +1130,11 @@ func (b *BIP) run(ctx context.Context) {
 			}
 			if b.active == 0 {
 				continue
+			}
+			if b.allowPacking && !b.packetPacking.Load() && now.Sub(b.lastPackOffer) >= time.Second {
+				id, tuple := b.nextTuple()
+				_ = b.send(8, id, tuple, bipKindReady, 0, 0, b.packOfferPayload(), b.active)
+				b.lastPackOffer = now
 			}
 			if now.Sub(b.lastProbe) >= time.Duration(b.cfg.Transport.BIPFastProbeMS)*time.Millisecond && (b.fastToken == 0 || !now.Before(b.fastDeadline)) {
 				var r [4]byte
@@ -1165,7 +1195,7 @@ func (b *BIP) run(ctx context.Context) {
 
 				b.pullProbeTx.Add(uint64(b.sendPullProbes(now, quota)))
 			}
-			if len(b.tx) > 0 && !fast && now.Sub(b.lastNeedPull) >= time.Duration(b.cfg.Transport.BIPNeedPullMS)*time.Millisecond {
+			if b.txBacklog() > 0 && !fast && now.Sub(b.lastNeedPull) >= time.Duration(b.cfg.Transport.BIPNeedPullMS)*time.Millisecond {
 				id, s := b.nextTuple()
 				_ = b.send(8, id, s, bipKindNeedPull, 0, 0, nil, b.active)
 				b.needPullTx.Add(1)
@@ -1223,7 +1253,7 @@ func (b *BIP) run(ctx context.Context) {
 				id, s := b.nextTuple()
 				// DATA loss is congestion evidence, not proof the FAST path died.
 				// Path probes/TTL independently decide when to fall back.
-				_ = b.send(typ, id, s, bipKindData, bipFlagMore, pd.item.seq, pd.item.data, b.active)
+				_ = b.send(typ, id, s, bipKindData, bipFlagMore|pd.item.flags, pd.item.seq, pd.item.data, b.active)
 			}
 			if (fast || compat) && !suspended {
 				quota := b.cfg.Tuner.MaxBurst
@@ -1241,7 +1271,7 @@ func (b *BIP) run(ctx context.Context) {
 				} else {
 					b.compatCredit = 0
 				}
-				for i := 0; i < quota && len(b.tx) > 0; i++ {
+				for i := 0; i < quota && b.txBacklog() > 0; i++ {
 					id, s := b.nextTuple()
 					typ, mode := byte(0), byte(pendingModeFast)
 					if compat {
@@ -1430,7 +1460,7 @@ func (b *BIP) decode(body []byte) (wirePacket, error) {
 		return p, errors.New("malformed BIP5")
 	}
 	p.kind = body[12]
-	if p.kind < 1 || p.kind > 10 || body[13]&^(bipFlagMore|bipFlagPulled) != 0 || (body[13]&bipFlagPulled != 0 && p.kind != bipKindData) {
+	if p.kind < 1 || p.kind > 10 || body[13]&^(bipFlagMore|bipFlagPulled|bipFlagPacked) != 0 || (body[13]&(bipFlagPulled|bipFlagPacked) != 0 && p.kind != bipKindData) {
 		return p, errors.New("unknown control")
 	}
 	key := b.macKey(p.kind)
@@ -1470,6 +1500,11 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 	pending := len(b.pending)
 	b.ackMu.Unlock()
 	return RuntimeStats{
+		PeerPacketPacking: b.packetPacking.Load(),
+		PackedDataTx: b.packedDataTx.Load(),
+		PackedFramesTx: b.packedFramesTx.Load(),
+		PackedDataRx: b.packedDataRx.Load(),
+		PackedFramesRx: b.packedFramesRx.Load(),
 		KernelEchoFilter:      b.kernelEchoFilter.Load(),
 		SocketReceiveBytes:    b.socketReceiveBytes.Load(),
 		SocketSendBytes:       b.socketSendBytes.Load(),
@@ -1506,7 +1541,7 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 		UnknownSession:        b.unknownSession.Load(),
 		DataDuplicate:         b.dataDuplicate.Load(),
 		Pending:               uint64(pending),
-		Backlog:               uint64(len(b.tx)),
+		Backlog:               uint64(b.txBacklog()),
 		Retransmits:           b.retransmits.Load(),
 		PendingExpired:        b.pendingExpired.Load(),
 		PendingOverflow:       b.pendingOverflow.Load(),

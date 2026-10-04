@@ -24,6 +24,8 @@ Cloud CPU profiles exposed repeated HMAC setup, full DATA copies and per-packet 
 
 CLI-generated samples (-gen server/client) now match the installer examples for unlimited adaptive scheduling, 8192-frame queue, 128-frame scheduling burst, eight retries and 1024-packet TUN queue. Existing explicit configurations still require option 21 to adopt this recipe.
 
+Completed native receive batches now enter the actor as one bounded event (at most 16 datagrams). The reader no longer wakes the actor with the first packet before enqueueing the rest, which could defeat reply batching. Queues remain bounded and packets are copied before reuse of receive storage; no additional input is awaited. Persistent-hole recovery uses the cheaper of advertised SACK offsets and retained pending entries, instead of scanning an entire wide flight for a narrow ACK range. Retry age/evidence guards, frozen deadlines and sequence-zero wrap handling remain tested.
+
 ## Short cloud validation
 
 No local Go/Python tooling or reference binary is executed. Tests run on disposable GitHub-hosted Linux amd64 and arm64 runners.

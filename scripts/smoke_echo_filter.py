@@ -1,6 +1,7 @@
 """Privileged BIP echo-filter scope and real systemd cleanup on disposable CI."""
 import json
 import os
+import signal
 import time
 
 from cloud_extended import OUT, Pair, run
@@ -81,7 +82,9 @@ def main():
         before = [rules(pair, i) for i in range(2)]
         pair.stop_peer(0); wait_absent(pair, 0)
         pair.start_peer(0); pair.reachable()
-        run('systemctl', 'kill', '--kill-whom=main', '--signal=SIGKILL', pair.units[0])
+        service_pid = pair.pid(0)
+        if not service_pid: raise RuntimeError('No running service PID for SIGKILL cleanup test')
+        os.kill(service_pid, signal.SIGKILL)
         wait_absent(pair, 0)
         pair.stop_peer(1); wait_absent(pair, 1)
         after = [rules(pair, i) for i in range(2)]

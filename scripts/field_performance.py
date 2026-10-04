@@ -101,6 +101,8 @@ def main():
                             row['status'] = 'pass' if result['received_mbps'] >= floor and row['processes_unchanged'] and not any(row['internal_recoveries']) else 'fail'
                             if label == 'candidate' and not all(p.get('telemetry', {}).get('carrier', {}).get('kernel_echo_filter') for p in after['peers']):
                                 row['status'] = 'fail'; row['reason'] = 'Scoped kernel reflection filter unavailable'
+                            if label == 'candidate' and not all(p.get('telemetry', {}).get('carrier', {}).get('peer_packet_packing') for p in after['peers']):
+                                row['status'] = 'fail'; row['reason'] = 'Native peers did not acknowledge packet packing capability'
                             if label == 'candidate' and mode == 'asymmetric' and feedback[0]['pull_probe_pps'] > 200:
                                 row['status'] = 'fail'; row['reason'] = 'Unanswered PULL overhead exceeded 200pps average'
                             if label == 'candidate' and mode == 'stateful' and not any(x['pulled_data_rx'] > 0 for x in feedback):
