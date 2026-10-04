@@ -49,7 +49,9 @@ func TestSACKFastRecoveryAcrossSequenceWrap(t *testing.T) {
 		b.queuePending(outData{seq: seq}, pendingModeFast, now)
 	}
 	b.processPeerAckAt(0xfffffffd, 0b1110, now.Add(20*time.Millisecond))
-	if _, ok := b.takeTimedOut(now.Add(21*time.Millisecond), time.Second); ok { t.Fatal("wrapped feedback bypassed reordering grace") }
+	if _, ok := b.takeTimedOut(now.Add(21*time.Millisecond), time.Second); ok {
+		t.Fatal("wrapped feedback bypassed reordering grace")
+	}
 	p, ok := b.takeTimedOut(now.Add(30*time.Millisecond), time.Second)
 	if !ok || p.item.seq != 0xfffffffe || !p.fast {
 		t.Fatal("wrapped SACK hole did not recover")
@@ -59,16 +61,24 @@ func TestSACKFastRecoveryAcrossSequenceWrap(t *testing.T) {
 func TestSACKReorderGraceStartsWhenEvidenceArrives(t *testing.T) {
 	b := testBIP(t)
 	b.tuner = adaptiveTuner()
-	b.tuner.srtt = 80*time.Millisecond
-	b.tuner.rto = 250*time.Millisecond
+	b.tuner.srtt = 80 * time.Millisecond
+	b.tuner.rto = 250 * time.Millisecond
 	now := time.Now()
-	for seq := uint32(1); seq <= 5; seq++ { b.queuePending(outData{seq: seq}, pendingModeFast, now) }
-	evidence := now.Add(90*time.Millisecond)
+	for seq := uint32(1); seq <= 5; seq++ {
+		b.queuePending(outData{seq: seq}, pendingModeFast, now)
+	}
+	evidence := now.Add(90 * time.Millisecond)
 	b.processPeerAckAt(0, 0b11110, evidence)
-	if due := b.pending[1].deadline; due.Before(evidence.Add(20*time.Millisecond)) { t.Fatal("late SACK feedback erased its reordering grace") }
-	if _, ok := b.takeTimedOut(evidence.Add(5*time.Millisecond), time.Second); ok { t.Fatal("reordered original retried before grace elapsed") }
+	if due := b.pending[1].deadline; due.Before(evidence.Add(20 * time.Millisecond)) {
+		t.Fatal("late SACK feedback erased its reordering grace")
+	}
+	if _, ok := b.takeTimedOut(evidence.Add(5*time.Millisecond), time.Second); ok {
+		t.Fatal("reordered original retried before grace elapsed")
+	}
 	b.processPeerAckAt(5, 0, evidence.Add(5*time.Millisecond))
-	if len(b.pending) != 0 || len(b.retryHeap) != 0 || b.tuner.cuts != 0 { t.Fatal("brief reorder damaged the reliable flight") }
+	if len(b.pending) != 0 || len(b.retryHeap) != 0 || b.tuner.cuts != 0 {
+		t.Fatal("brief reorder damaged the reliable flight")
+	}
 }
 
 func TestFastLossKeepsAckClockButStillReducesCapacity(t *testing.T) {

@@ -20,6 +20,7 @@ type Carrier interface {
 // RuntimeStats is optional carrier telemetry used by the engine's periodic
 // status line. Counters are cumulative for the current transport instance.
 type RuntimeStats struct {
+	KernelEchoFilter    bool    `json:"kernel_echo_filter"`
 	SocketReceiveBytes  int64   `json:"socket_receive_bytes"`
 	SocketSendBytes     int64   `json:"socket_send_bytes"`
 	ControlTxBytes      uint64  `json:"control_tx_bytes"`

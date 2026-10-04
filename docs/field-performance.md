@@ -42,6 +42,8 @@ These short synthetic checks cannot predict multi-day survival on a different pr
 
 ## Reference interpretation and subsequent protocol work
 
+The candidate automatically adds an instance-tagged iptables OUTPUT rule scoped to the configured outer IPv4 pair, EchoReply type, BIP5 magic and kinds 2/3/7. These are redundant kernel copies of originated PULL/NEED_PULL/HELLO requests. DATA/ACK/FAST and ordinary ping pass. Normal close deletes that exact rule; the installed systemd unit also invokes `-cleanup-bip-echo` in ExecStopPost after abnormal termination. Missing iptables/u32 support logs a warning and leaves the transport operational, with `kernel_echo_filter=false`. No chain flush or global ICMP suppression is performed. Cloud scope tests exercise both endpoints, another outer peer, unrelated rules, inner ping and normal/SIGKILL cleanup. Exact-source field gates require the filter to be installed and retain endpoint rule counters.
+
 [Dagger's own README](https://github.com/itsFLoKi/daggerConnect) advertises a proprietary DagMux core. It does not publish enough implementation detail here to conclude that DagMux is a modified SMUX, or that its TUN uses the same stream multiplexer. Compiled legacy SMUX/KCP symbols and installer values are evidence of capabilities/configuration, not active algorithms. GGSTunnel adds no SMUX dependency and does not claim to copy DagMux.
 
 Backhaul's 8-way MUX, 4MiB session receive buffer and 2MiB stream buffers, and Dagger's resource profiles, motivate independent flow budgets and bounded scheduling. Their stream frame sizes and pool count must not be copied as raw ICMP MTU or eight conflicting TUN interfaces.

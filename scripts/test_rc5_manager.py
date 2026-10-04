@@ -106,6 +106,17 @@ class RC5ManagerTests(unittest.TestCase):
   self.assertTrue(small['tuner']['unlimited_rate'])
   self.assertEqual(tcp,original)
   self.assertTrue(all(call.args[1] for call in save.call_args_list))
+ def test_nullable_performance_fields_use_load_defaults(self):
+  nullable=m.make_config(1,'bip','198.51.100.10','203.0.113.20',24001,'a'*64,'server')
+  nullable['tuner']=None;nullable['transport']['sock_buf']=None
+  nullable['performance']['queue_size']=None;nullable['tun']['tx_queue_len']=None
+  with patch.object(m,'configs',return_value={'ggs01':nullable}),patch.object(m,'save_config') as save,contextlib.redirect_stdout(io.StringIO()):
+   m.optimize_existing()
+  save.assert_called_once()
+  self.assertTrue(nullable['tuner']['unlimited_rate'])
+  self.assertEqual(nullable['transport']['sock_buf'],4<<20)
+  self.assertEqual(nullable['performance']['queue_size'],8192)
+  self.assertEqual(nullable['tun']['tx_queue_len'],1024)
  def test_every_menu_option_dispatches(self):
   route={'1':'create_server','2':'join_client','3':'status','9':'edit','10':'delete','11':'encode_join',
          '12':'run_logs','13':'diagnose','14':'capacity','15':'capacity','16':'tune','17':'tune',

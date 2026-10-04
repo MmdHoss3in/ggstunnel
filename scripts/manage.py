@@ -447,6 +447,7 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 ExecStart=/opt/ggstunnel/current/dist/BINARY -c /etc/ggstunnel/tunnels/%i.json -stats-file /run/ggstunnel/%i.json
+ExecStopPost=-/opt/ggstunnel/current/dist/BINARY -c /etc/ggstunnel/tunnels/%i.json -cleanup-bip-echo
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=15
@@ -614,11 +615,12 @@ def menu():
 def optimize_existing():
     for c in configs().values():
         if c['profile']!='bip':continue
-        c.setdefault('tuner',{}).update(mode='adaptive',unlimited_rate=True,max_burst=128)
+        c['tuner']=dict(c.get('tuner') or {})
+        c['tuner'].update(mode='adaptive',unlimited_rate=True,max_burst=128)
         c.setdefault('transport',{}).update(bip_pull_burst=128,bip_max_retries=8)
-        c['transport']['sock_buf']=max(4<<20,c['transport'].get('sock_buf',4<<20))
-        c['performance']['queue_size']=max(8192,c['performance'].get('queue_size',8192))
-        c['tun']['tx_queue_len']=max(1024,c['tun'].get('tx_queue_len',1024))
+        c['transport']['sock_buf']=max(4<<20,c['transport'].get('sock_buf') or 4<<20)
+        c['performance']['queue_size']=max(8192,c['performance'].get('queue_size') or 8192)
+        c['tun']['tx_queue_len']=max(1024,c['tun'].get('tx_queue_len') or 1024)
         save_config(c,True)
     print('BIP performance defaults applied; both peers must run BIP5.')
     print('Host socket ceilings are separate: option 16, then restart active tunnels. Existing larger buffers are preserved.')

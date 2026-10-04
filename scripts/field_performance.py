@@ -79,6 +79,7 @@ def main():
                             row['cpu_cores_used'] = [round((b.get('cpu_sec', 0)-a.get('cpu_sec', 0))/elapsed, 3)
                                                      for a, b in zip(before['peers'], after['peers'])]
                             row['end_snapshot'] = after
+                            row['endpoint_firewall'] = [run('ip', 'netns', 'exec', name, 'iptables-save', '-c').stdout for name in pair.names]
                             row['router_qdiscs'] = [json.loads(run('ip', 'netns', 'exec', pair.router, 'tc', '-j', '-s', 'qdisc', 'show', 'dev', dev).stdout)
                                                     for dev in pair.router_devs]
                             feedback = []
@@ -98,6 +99,8 @@ def main():
                                                           for a, b in zip(before['peers'], after['peers'])]
                             floor = (100 if rate == 200 else 200) if mode in ('clean', 'asymmetric', 'stateful') else 30
                             row['status'] = 'pass' if result['received_mbps'] >= floor and row['processes_unchanged'] and not any(row['internal_recoveries']) else 'fail'
+                            if label == 'candidate' and not all(p.get('telemetry', {}).get('carrier', {}).get('kernel_echo_filter') for p in after['peers']):
+                                row['status'] = 'fail'; row['reason'] = 'Scoped kernel reflection filter unavailable'
                             if label == 'candidate' and mode == 'asymmetric' and feedback[0]['pull_probe_pps'] > 200:
                                 row['status'] = 'fail'; row['reason'] = 'Unanswered PULL overhead exceeded 200pps average'
                             if label == 'candidate' and mode == 'stateful' and not any(x['pulled_data_rx'] > 0 for x in feedback):

@@ -54,6 +54,7 @@ jobs:
           go vet ./...
           go test -race -tags audit -short -count=1 -timeout 5m ./...
           go test -race ./internal/carrier -run '^TestPullFeedback' -count=5 -timeout 2m -v | tee field-artifacts/pull-regression.log
+          go test -race ./internal/carrier -run 'Test(KernelEchoFilter|UnavailableEchoFilter|BIP|FASTReply)' -count=3 -timeout 3m -v | tee field-artifacts/bip-echo-regression.log
       - name: Prove historical-rate regression on rc1
         run: |
           BASE=$(mktemp -d)
@@ -88,7 +89,10 @@ jobs:
           bash scripts/build-release.sh
           python3 scripts/check_version.py
           python3 -m unittest discover -s scripts -p 'test_*.py' -v
+          sudo apt-get update -qq
+          sudo apt-get install -y iptables ethtool
           sudo env GITHUB_ACTIONS=true python3 scripts/smoke_systemd.py
+          sudo env GITHUB_ACTIONS=true python3 scripts/smoke_echo_filter.py
       - name: Real field-pattern comparison
         run: |
           sudo apt-get update -qq

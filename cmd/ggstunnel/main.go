@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"ggstunnel/internal/config"
+	"ggstunnel/internal/carrier"
 	"ggstunnel/internal/engine"
 	"ggstunnel/internal/version"
 )
@@ -23,6 +24,7 @@ func main() {
 	check := flag.Bool("check", false, "validate config and exit")
 	statsFile := flag.String("stats-file", "", "optional private JSON telemetry path")
 	showVersion := flag.Bool("version", false, "print version")
+	cleanupEcho := flag.Bool("cleanup-bip-echo", false, "remove this configuration's redundant BIP kernel echo rule")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("ggstunnel", buildVersion)
@@ -42,6 +44,10 @@ func main() {
 	}
 	if *statsFile != "" {
 		c.Telemetry.StatsFile = *statsFile
+	}
+	if *cleanupEcho {
+		if err := carrier.CleanupBIPReflectionFilter(c); err != nil { log.Printf("BIP kernel echo cleanup: %v", err) }
+		return
 	}
 	if *check {
 		fmt.Printf("OK: role=%s profile=%s tun=%s %s<->%s\n", c.Role, c.Profile, c.TUN.Name, c.TUN.LocalAddr, c.TUN.RemoteAddr)

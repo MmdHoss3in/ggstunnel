@@ -146,6 +146,8 @@ type BIP struct {
 	batchEmit                                                                                        func([][]byte) (int, error)
 	collectDATA                                                                                      bool
 	dataBatch                                                                                        [][]byte
+	echoFilterCleanup                                                                                func()
+	kernelEchoFilter                                                                                 atomic.Bool
 	cancel                                                                                           context.CancelFunc
 	workers                                                                                          sync.WaitGroup
 	closeOnce                                                                                        sync.Once
@@ -313,6 +315,13 @@ func (b *BIP) Start(ctx context.Context) error {
 	log.Printf("BIP socket buffers requested=%d receive_kernel=%d send_kernel=%d (Linux values include doubled accounting)", b.cfg.Transport.SockBuf, b.socketReceiveBytes.Load(), b.socketSendBytes.Load())
 	b.recv = r
 	b.rawfd = fd
+	if cleanup, err := installBIPReflectionFilter(b.local.String(), b.peer.String(), b.cfg.TUN.Name, runEchoRule); err != nil {
+		log.Printf("BIP redundant kernel echo filter unavailable: %v", err)
+	} else {
+		b.echoFilterCleanup = cleanup
+		b.kernelEchoFilter.Store(true)
+		log.Printf("BIP redundant kernel echo filter enabled for outer peer")
+	}
 	b.emit = func(w []byte) error {
 		sa := &syscall.SockaddrInet4{}
 		copy(sa.Addr[:], b.peer)
@@ -422,6 +431,8 @@ func (b *BIP) Close() error {
 			b.backend.Close()
 		}
 		b.workers.Wait()
+		if b.echoFilterCleanup != nil { b.echoFilterCleanup() }
+		b.kernelEchoFilter.Store(false)
 		// The raw sender is nonblocking. Keep its descriptor valid until the
 		// actor has stopped, so a concurrent open cannot reuse it mid-send.
 		if b.started && b.rawfd >= 0 {
@@ -1440,6 +1451,7 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 	pending := len(b.pending)
 	b.ackMu.Unlock()
 	return RuntimeStats{
+		KernelEchoFilter:      b.kernelEchoFilter.Load(),
 		SocketReceiveBytes:    b.socketReceiveBytes.Load(),
 		SocketSendBytes:       b.socketSendBytes.Load(),
 		ControlTxBytes:        b.controlTxBytes.Load(),
