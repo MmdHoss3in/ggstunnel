@@ -42,9 +42,13 @@ def main():
     counts['impairments'] = sum(r.get('kind') == 'recovery' and r.get('scenario') != 'blackhole3' for r in rows)
     summary['observation_counts'] = counts
     expected = dict(baseline=60, performance=180, resource_cycle=90, resource_integrity=2,
-                    resource_summary=4, lifecycle=30, impairments=12, steady_loss=18, compatibility=2,
+                    resource_summary=4, lifecycle=30, impairments=12, steady_loss=18, compatibility=6,
                     capacity_baseline=16,capacity=32,capacity_hold=2)
     summary['planned_observations_complete'] = all(counts[k] == n for k, n in expected.items()) and summary['planned_60_trials_complete']
+    compatible=[r for r in rows if r.get('kind')=='compatibility']
+    required_compatibility={(tag,peer) for tag in ('v0.3.0-rc4','v0.3.0','v0.3.1-rc1') for peer in (0,1)}
+    summary['compatibility_scenarios_complete']=len(compatible)==6 and {(r.get('legacy_tag'),r.get('legacy_peer')) for r in compatible}==required_compatibility
+    summary['planned_observations_complete'] = summary['planned_observations_complete'] and summary['compatibility_scenarios_complete']
     capacities=[r for r in rows if r.get('kind')=='capacity']
     capacity_keys={(r.get('rate_mbps'),r.get('rtt_ms'),r.get('reverse'),r.get('repeat')) for r in capacities}
     required_capacity={(rate,rtt,reverse,repeat) for rate in (100,200,500,1000) for rtt in (20,80) for reverse in (False,True) for repeat in range(2)}

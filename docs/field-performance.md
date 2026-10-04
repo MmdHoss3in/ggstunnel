@@ -1,4 +1,4 @@
-# v0.3.1-rc2 field performance repairs
+# v0.3.1 field performance repairs
 
 The supplied field logs show FAST in Iran and COMPAT at the foreign endpoint, with no confirmed foreign FAST ACK reception. Iran emitted 82,066 PULL probes versus 55,407 FAST DATA frames in an 18-second interval. These are directional control/data transmission counts, not a PULL response ratio. The operator reports concurrent Xray users and that neither menu option 16 nor 21 had been applied.
 

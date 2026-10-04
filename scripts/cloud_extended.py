@@ -465,32 +465,36 @@ def steady_loss():
 def compatibility():
     failures=0
     with Pair() as pair:
-        base='https://github.com/MmdHoss3in/ggstunnel/releases/download/v0.3.0-rc4/'
-        archive=pair.path/'legacy.tar.gz';sums=pair.path/'legacy.sums'
-        for filename,dest in [('ggstunnel-linux.tar.gz',archive),('SHA256SUMS',sums)]:
-            run('curl','--fail','--location','--retry','3','--proto','=https',base+filename,'-o',dest,timeout=120)
-        expected=[line.split()[0] for line in sums.read_text().splitlines() if line.split()[-1].lstrip('*')=='ggstunnel-linux.tar.gz']
-        if len(expected)!=1 or hashlib.sha256(archive.read_bytes()).hexdigest()!=expected[0]:raise RuntimeError('Legacy release checksum mismatch')
-        with tarfile.open(archive) as t:t.extractall(pair.path/'legacy',filter='data')
-        old=pair.path/'legacy/ggstunnel/dist'/BIN.name
-        version=run(old,'-version').stdout.strip()
-        if not version.endswith('0.3.0-rc4'):raise RuntimeError('Wrong legacy executable')
-        for legacy_peer in (0,1):
-            pair.executables=[BIN,BIN];pair.executables[legacy_peer]=old
-            row=dict(kind='compatibility',legacy_peer=legacy_peer,legacy_version=version)
-            try:
-                pair.shape(100,80);pair.restart();echo=pair.probe_server();probe=pair.probe(10)
-                row.update(pair.finish_iperf(*pair.iperf('10.77.1.2',8,2,bool(legacy_peer)),40))
-                data=pair.finish_probe(probe,20);stop(echo)
-                row['verified_frames']=data['verified_frames']
-                time.sleep(1);snapshot=pair.sample()['peers'][1-legacy_peer].get('telemetry',{})
-                row['new_peer_telemetry']=snapshot
-                if row['received_mbps']<30 or data['verified_frames']<10:raise RuntimeError('Mixed-version transfer failed')
-                row['status']='pass'
-            except Exception as error:failures+=1;row.update(status='fail',error=str(error))
-            finally:
-                for p in pair.children:stop(p)
-                pair.children=[];record(row)
+        for legacy_tag in ('v0.3.0-rc4', 'v0.3.0', 'v0.3.1-rc1'):
+            base='https://github.com/MmdHoss3in/ggstunnel/releases/download/'+legacy_tag+'/'
+            legacy_dir=pair.path/legacy_tag
+            legacy_dir.mkdir()
+            archive=legacy_dir/'legacy.tar.gz';sums=legacy_dir/'legacy.sums'
+            for filename,dest in [('ggstunnel-linux.tar.gz',archive),('SHA256SUMS',sums)]:
+                run('curl','--fail','--location','--retry','3','--proto','=https',base+filename,'-o',dest,timeout=120)
+            expected=[line.split()[0] for line in sums.read_text().splitlines() if line.split()[-1].lstrip('*')=='ggstunnel-linux.tar.gz']
+            if len(expected)!=1 or hashlib.sha256(archive.read_bytes()).hexdigest()!=expected[0]:raise RuntimeError('Legacy release checksum mismatch')
+            with tarfile.open(archive) as t:t.extractall(legacy_dir/'source',filter='data')
+            old=legacy_dir/'source/ggstunnel/dist'/BIN.name
+            version=run(old,'-version').stdout.strip()
+            if version != 'ggstunnel '+legacy_tag[1:]:raise RuntimeError('Wrong legacy executable')
+            for legacy_peer in (0,1):
+                pair.executables=[BIN,BIN];pair.executables[legacy_peer]=old
+                row=dict(kind='compatibility',legacy_peer=legacy_peer,legacy_tag=legacy_tag,legacy_version=version)
+                try:
+                    pair.shape(100,80);pair.restart();echo=pair.probe_server();probe=pair.probe(10)
+                    row.update(pair.finish_iperf(*pair.iperf('10.77.1.2',8,2,bool(legacy_peer)),40))
+                    data=pair.finish_probe(probe,20);stop(echo)
+                    row['verified_frames']=data['verified_frames']
+                    time.sleep(1);snapshot=pair.sample()['peers'][1-legacy_peer].get('telemetry',{})
+                    row['new_peer_telemetry']=snapshot
+                    if row['received_mbps']<30 or data['verified_frames']<10:raise RuntimeError('Mixed-version transfer failed')
+                    if snapshot.get('carrier',{}).get('peer_packet_packing') is not False:raise RuntimeError('Legacy peer enabled incompatible packed DATA')
+                    row['status']='pass'
+                except Exception as error:failures+=1;row.update(status='fail',error=str(error))
+                finally:
+                    for p in pair.children:stop(p)
+                    pair.children=[];record(row)
     return failures
 
 
