@@ -64,8 +64,9 @@ def percentile(values, fraction):
 
 
 class Pair:
-    def __init__(self, profile='bip', supervised=False):
+    def __init__(self, profile='bip', supervised=False, label=''):
         self.profile = profile; self.supervised = supervised
+        self.label = label
         self.names = ['gx-a', 'gx-b']; self.devs = ['gx-va', 'gx-vb']
         self.router = 'gx-r'; self.router_devs = ['gx-ra', 'gx-rb']
         self.outer = ['192.0.2.1', '198.51.100.1']
@@ -104,7 +105,7 @@ class Pair:
                 cfg['tun'].update(name='gx0', local_addr=f'10.77.1.{i+1}', remote_addr=f'10.77.1.{2-i}')
                 cfg['telemetry'].update(interval_sec=1, stats_file=str(self.path / f'stats-{i}.json'))
                 (self.path / f'{i}.json').write_text(json.dumps(cfg)); (self.path / f'{i}.json').chmod(0o600)
-                self.logs.append((OUT / f'tunnel-{i}.log').open('a'))
+                self.logs.append((OUT / f'{self.label}tunnel-{i}.log').open('a'))
             self.shape()
             if self.supervised:
                 import manage as manager
@@ -146,8 +147,12 @@ class Pair:
         if self.supervised:
             run('systemctl','start',self.units[i])
         else:
+            env = os.environ.copy()
+            if os.environ.get('GGS_RETRY_TRACE') == 'true':
+                env['GGSTUNNEL_BIP_TRACE'] = str(OUT / f'{self.label}retry-{i}-{time.time_ns()}.jsonl')
+                env['GGSTUNNEL_BIP_TRACE_LOSS_ONLY'] = '1'
             self.p[i] = subprocess.Popen(['ip', 'netns', 'exec', self.names[i], str(self.executables[i]),
-                                          '-c', str(self.path / f'{i}.json')], stdout=self.logs[i], stderr=self.logs[i])
+                                          '-c', str(self.path / f'{i}.json')], stdout=self.logs[i], stderr=self.logs[i], env=env)
 
     def stop_peer(self, i):
         if self.supervised:

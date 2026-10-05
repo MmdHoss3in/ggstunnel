@@ -1,0 +1,47 @@
+name: BIP retry diagnosis
+on:
+  push:
+    branches: [feature/compact-wire]
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  diagnose:
+    if: contains(github.event.head_commit.message, '[retry-diagnosis]') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Build diagnostic source and retain formatting
+        run: |
+          mkdir -p retry-artifacts
+          gofmt -w cmd internal
+          git diff --binary -- cmd internal > retry-artifacts/gofmt.patch
+          cat retry-artifacts/gofmt.patch
+          go test -race -tags audit -short -count=1 -timeout 5m ./...
+          bash scripts/build-release.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool iptables
+      - name: Reproduce ARM asymmetric session exhaustion without changing gates
+        run: sudo env GITHUB_ACTIONS=true GGS_RETRY_TRACE=true GGS_RETRY_FOCUS=true GGS_FIELD_MODE=asymmetric GGS_FIELD_REPEATS=8 python3 scripts/field_performance.py
+      - name: Repeat 3 percent loss with the original useful-progress gate
+        if: always()
+        run: sudo env GITHUB_ACTIONS=true GGS_RETRY_TRACE=true GGS_FOCUS=true python3 scripts/cloud_extended.py steady-loss
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retry-diagnosis-${{ matrix.runner }}
+          path: |
+            retry-artifacts/
+            extended-results/

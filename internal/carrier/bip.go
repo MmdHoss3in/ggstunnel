@@ -1331,6 +1331,8 @@ func (b *BIP) run(ctx context.Context) {
 					break
 				}
 				if pd.item.retries >= b.cfg.Transport.BIPMaxRetries {
+					b.traceRecord(traceEvent{At: now, Event: "delivery_exhausted", Seq: pd.item.seq, Ack: b.txAckBase, Mode: pd.mode, Retries: pd.item.retries, AgeMS: float64(now.Sub(pd.sent)) / float64(time.Millisecond), Pending: len(b.pending), Backlog: len(b.tx)})
+					log.Printf("BIP delivery exhausted seq=%d retries=%d mode=%d path=%d cumulative_ack=%d highest_sent=%d pending=%d last_attempt_age=%s", pd.item.seq, pd.item.retries, pd.mode, b.tuningPath, b.txAckBase, b.dataSeq, len(b.pending), now.Sub(pd.sent))
 					b.pendingExpired.Add(1)
 					b.fail(fmt.Errorf("%w at %d", ErrBIPDeliveryTimeout, pd.item.seq))
 					return

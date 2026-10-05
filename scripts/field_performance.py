@@ -42,26 +42,30 @@ def main():
     for key in ('net.core.rmem_max', 'net.core.wmem_max'):
         current = int(run('sysctl', '-n', key).stdout.strip())
         run('sysctl', '-qw', f'{key}={max(current, 16<<20)}')
-    base = Path(os.environ['GGS_FIELD_BASE']) / 'dist' / ('ggstunnel-linux-' + ARCH)
+    base = Path(os.environ.get('GGS_FIELD_BASE', str(BIN.parents[1]))) / 'dist' / ('ggstunnel-linux-' + ARCH)
     failures = []
     rows = []
     modes = (os.environ['GGS_FIELD_MODE'],) if os.environ.get('GGS_FIELD_MODE') else ('clean', 'asymmetric', 'stateful', 'pps')
     if any(mode not in ('clean', 'asymmetric', 'stateful', 'pps') for mode in modes):
         raise ValueError('Unknown field case')
     for mode in modes:
-        for rate in ((200,) if mode == 'pps' else (200, 500)):
-            for reverse in (False, True):
+        for rate in ((200,) if mode == 'pps' or os.environ.get('GGS_RETRY_FOCUS') == 'true' else (200, 500)):
+            repeats = int(os.environ.get('GGS_FIELD_REPEATS', '1'))
+            if not 1 <= repeats <= 20: raise ValueError('Invalid repetition count')
+            directions = (False,) if os.environ.get('GGS_RETRY_FOCUS') == 'true' else (False, True)
+            for reverse, repeat in ((d, r) for d in directions for r in range(repeats)):
                 versions = [('rc1', base), ('candidate', BIN)]
+                if os.environ.get('GGS_RETRY_FOCUS') == 'true': versions = [('candidate', BIN)]
                 if reverse: versions.reverse()
                 samples = {}
                 for label, executable in versions:
                     row = dict(case=mode, link_mbps=rate, base_rtt_ms=80, reverse=reverse,
-                               version_label=label, architecture=ARCH, sample_sec=10, warmup_sec=2)
+                               version_label=label, architecture=ARCH, sample_sec=10, warmup_sec=2, repeat=repeat)
                     row['host_cpus'] = len(os.sched_getaffinity(0))
                     quota_file = Path('/sys/fs/cgroup/cpu.max')
                     row['cpu_quota'] = quota_file.read_text().strip() if quota_file.exists() else None
                     try:
-                        with Pair('bip') as pair:
+                        with Pair('bip', label=f'field-{mode}-{rate}-{reverse}-{label}-{repeat}-') as pair:
                             pair.executables = [executable, executable]
                             firewall(pair, mode)
                             pair.shape(rate, 80)
