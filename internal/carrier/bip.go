@@ -93,8 +93,8 @@ type wirePacket struct {
 }
 
 type ackDelivery struct {
-	seq  uint32
-	sent time.Time
+	seq     uint32
+	sent    time.Time
 	retries int
 }
 
