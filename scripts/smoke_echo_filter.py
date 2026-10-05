@@ -109,6 +109,15 @@ def compact_alias(pair, i):
 
 
 def compact_main():
+    # Match menu 16 and the native performance harness: a 4 MiB request must
+    # not silently become a tiny host-default receive buffer on Ubuntu 22.
+    buffers = {}
+    for key in ('net.core.rmem_max', 'net.core.wmem_max'):
+        before = int(run('sysctl', '-n', key).stdout)
+        after = max(before, 16 << 20)
+        run('sysctl', '-qw', f'{key}={after}')
+        buffers[key] = dict(before=before, applied=after)
+    print('Compact smoke socket ceilings: '+json.dumps(buffers), flush=True)
     with Pair('bip', supervised=True) as pair:
         import manage as m
         for i, unit in enumerate(pair.units):
@@ -145,8 +154,13 @@ def compact_main():
         for reverse in (False, True):
             server, client = pair.iperf('10.77.1.2', seconds=4, warmup=1, reverse=reverse, streams=8)
             measured = pair.finish_iperf(server, client, 20)
-            if measured['received_mbps'] < 100: raise RuntimeError('Compact scoped filter throughput below 100 Mbps')
             throughput.append(dict(reverse=reverse, **measured))
+            evidence = dict(throughput=throughput, socket_ceilings=buffers, snapshot=pair.sample())
+            (OUT / 'compact-echo-filter-throughput.json').write_text(json.dumps(evidence, indent=2))
+            print('Compact smoke throughput: '+json.dumps(throughput[-1]), flush=True)
+            if measured['received_mbps'] < 100:
+                print('Compact smoke failure evidence: '+json.dumps(evidence), flush=True)
+                raise RuntimeError('Compact scoped filter throughput below 100 Mbps')
         time.sleep(1.1)
         if not all(p.get('telemetry', {}).get('carrier', {}).get('kernel_echo_filter')
                    for p in pair.sample()['peers']): raise RuntimeError('Compact filter telemetry false')
@@ -167,7 +181,7 @@ def compact_main():
         if not all('ci-unrelated-keep' in text for text in after): raise RuntimeError('Compact cleanup removed unrelated rule')
         leftovers = list(m.RUN.glob('compact-echo-ggs166-*.json'))+list(m.RUN.glob('compact-echo-ggs167-*.json'))
         if leftovers: raise RuntimeError('Compact cleanup left durable recipes behind')
-        result = dict(status='pass', scope=observations, ordinary_ping_pass=True, unrelated_peer_pass=True,
+        result = dict(status='pass', scope=observations, ordinary_ping_pass=True, unrelated_peer_pass=True, socket_ceilings=buffers,
                       inner_ping_pass=True, throughput=throughput, peer_rotation_cleanup=True,
                       normal_stop_cleanup=True, sigkill_exec_stop_post_cleanup=True,
                       rules_before=before, rules_after=after)
