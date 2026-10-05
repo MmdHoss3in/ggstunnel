@@ -137,6 +137,7 @@ type BIP struct {
 	tuning                                                                                           atomic.Pointer[TunerSnapshot]
 	lastTuning                                                                                       time.Time
 	tuningPath                                                                                       byte
+	requestPathProven                                                                                bool
 	txAckBase                                                                                        uint32
 	pullCredit, compatCredit                                                                         float64
 	lastTick                                                                                         time.Time
@@ -642,6 +643,9 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 				}
 			}
 		}
+		if p.mode == pendingModeRequest && p.item.retries == 0 {
+			b.requestPathProven = true
+		}
 		b.removePending(p)
 		delete(b.pending, seq)
 	}
@@ -820,6 +824,7 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.lossFlightSet = false
 	b.txAckBase = 0
 	b.nextPullRetryCheck = time.Time{}
+	b.requestPathProven = false
 	b.poll = pullPoller{}
 	b.replay = frame.NewReplayGuard(65536)
 	b.fastUntil = time.Time{}
@@ -1236,21 +1241,9 @@ func (b *BIP) run(ctx context.Context) {
 				_ = b.send(8, id, tuple, bipKindReady, 0, 0, b.packOfferPayload(), b.active)
 				b.lastPackOffer = now
 			}
-			if now.Sub(b.lastProbe) >= time.Duration(b.cfg.Transport.BIPFastProbeMS)*time.Millisecond && (b.fastToken == 0 || !now.Before(b.fastDeadline)) {
-				var r [4]byte
-				if _, err := rand.Read(r[:]); err != nil {
-					b.fail(err)
-					return
-				}
-				b.fastToken = binary.BigEndian.Uint32(r[:])
-				if b.fastToken == 0 {
-					b.fastToken = 1
-				}
-				b.fastDeadline = now.Add(time.Duration(b.cfg.Transport.BIPFastTTLMS) * time.Millisecond)
-				id, s := b.nextTuple()
-				_ = b.send(0, id, s, bipKindFastProbe, 0, b.fastToken, nil, b.active)
-				b.lastProbe = now
-				b.fastProbeTx.Add(1)
+			if err := b.maintainFASTProbe(now); err != nil {
+				b.fail(err)
+				return
 			}
 			fast := now.Before(b.fastUntil)
 			b.drainRX()

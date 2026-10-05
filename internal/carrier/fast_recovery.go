@@ -31,7 +31,7 @@ func (b *BIP) detectSACKLoss(delivered []ackDelivery, now time.Time) {
 		guard = max(guard, b.tuner.srtt/4)
 	}
 	for seq, p := range b.pending {
-		if p.fast || p.index < 0 {
+		if p.fast || p.index < 0 || !b.canAcceleratePending(p) {
 			continue
 		}
 		distance := sequenceDistance(base, seq)
@@ -131,7 +131,7 @@ func (b *BIP) recoverPersistentHole(ack uint32, bits uint64, payload []byte, wid
 		if p == nil {
 			return
 		}
-		if p.item.retries == 0 || p.fast || p.index < 0 || now.Sub(p.sent) < guard || !seqAfter(seq, ack) || sequenceDistance(ack, seq) >= highest {
+		if p.item.retries == 0 || p.fast || p.index < 0 || !b.canAcceleratePending(p) || now.Sub(p.sent) < guard || !seqAfter(seq, ack) || sequenceDistance(ack, seq) >= highest {
 			return
 		}
 		p.sacked++
@@ -155,4 +155,13 @@ func (b *BIP) recoverPersistentHole(ack uint32, bits uint64, payload []byte, wid
 			visit(seq, p)
 		}
 	}
+}
+
+// SACKs returned over FAST/PULL prove a hole, but do not prove that an
+// EchoRequest retry can traverse the opposite direction. Keep ordinary
+// exponential backoff until a clean request delivery proves that carrier.
+// A peer PULL can still carry the retained frame immediately; a newly verified
+// FAST probe can still expedite it. Neither route resets the retry budget.
+func (b *BIP) canAcceleratePending(p *pendingData) bool {
+	return p.mode != pendingModeRequest || b.requestPathProven
 }

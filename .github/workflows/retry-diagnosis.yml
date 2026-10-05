@@ -34,7 +34,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y iperf3 ethtool iptables
       - name: Reproduce ARM asymmetric session exhaustion without changing gates
-        run: sudo env GITHUB_ACTIONS=true GGS_RETRY_TRACE=true GGS_RETRY_FOCUS=true GGS_FIELD_MODE=asymmetric GGS_FIELD_REPEATS=8 python3 scripts/field_performance.py
+        run: sudo env GITHUB_ACTIONS=true GGS_RETRY_TRACE=true GGS_RETRY_FOCUS=true GGS_FIELD_MODE=asymmetric GGS_FIELD_REPEATS=20 python3 scripts/field_performance.py
       - name: Repeat 3 percent loss with the original useful-progress gate
         if: always()
         run: sudo env GITHUB_ACTIONS=true GGS_RETRY_TRACE=true GGS_FOCUS=true python3 scripts/cloud_extended.py steady-loss
