@@ -38,6 +38,13 @@ jobs:
       - name: Repeat 3 percent loss with the original useful-progress gate
         if: always()
         run: sudo env GITHUB_ACTIONS=true GGS_RETRY_TRACE=true GGS_FOCUS=true python3 scripts/cloud_extended.py steady-loss
+      - name: Summarize exhausted histories and make root-owned private traces uploadable
+        if: always()
+        run: |
+          sudo python3 scripts/analyze_retry_trace.py
+          # The runtime deliberately creates private diagnostic traces (0600).
+          # Transfer ownership to this disposable runner; do not make them public.
+          sudo chown -R "$(id -u):$(id -g)" extended-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -31,9 +31,9 @@ type traceEvent struct {
 }
 
 type bipTrace struct {
-	events  chan traceEvent
-	done    chan struct{}
-	dropped atomic.Uint64
+	events   chan traceEvent
+	done     chan struct{}
+	dropped  atomic.Uint64
 	lossOnly bool
 }
 
