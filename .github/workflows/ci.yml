@@ -7,6 +7,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: linux-validation-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   transport-validation:
     uses: ./.github/workflows/compact-validation.yml

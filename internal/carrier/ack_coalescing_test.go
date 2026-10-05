@@ -31,7 +31,9 @@ func TestACKPiggybackRequiresActualTransmissionAndMatchingState(t *testing.T) {
 				b.rxAck.max = 2
 			}
 			if tc.wide {
-				b.rxAck.seen[100] = true
+				if !b.recordRXSeq(100) {
+					t.Fatal("wide SACK test frame was rejected")
+				}
 			}
 			b.recordWireResult(packet, !tc.fail)
 			if b.ackDue.IsZero() != tc.cleared {

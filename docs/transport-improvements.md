@@ -2,6 +2,8 @@
 
 This work is on `feature/compact-wire`; it is not a published stable release. The installed v0.3.1 format remains the default. The new compact format requires an explicit choice on both ends.
 
+**CI correction:** earlier workflow step successes did not establish a complete race/audit pass. An ACK wide-SACK test fixture wrote into a nil map; `go test | tee` concealed that failure because the implicit shell did not enable pipefail. Raw logs from runs 37267721847 through 37273743286 retain the panic. The fixture now exercises `recordRXSeq` to create real receiver state, and the workflow explicitly selects Bash with pipefail. Prior network observations, direct compact tests and manager/native-socket checks remain separate evidence; the complete suite must pass again before release. Earlier claims of a complete code-test pass are withdrawn.
+
 ## Reference evidence
 
 The supplied Dagger setup script separates TCP encapsulation from TUN/IPX profiles ICMP/GRE/IPIP/BIP. Its TUN configuration requests a 4 MiB socket buffer, MTU 1420 and heartbeat/idle deadlines. Connection pool 8 is offered for non-TUN transports, not for TUN. Compiled smux and batched IO symbols cannot establish whether DagMux is active or reveal its algorithm. No supplied binary or script was executed or uploaded.
@@ -34,7 +36,7 @@ The existing kernel echo filter matches legacy clear-text kinds. It is deliberat
 
 ## Verified cloud observations
 
-All execution uses disposable GitHub Linux runners; no local Go/Python toolchain or reference binary was installed or executed. Both amd64 and arm64 have passed vet, race/audit tests, repeated startup/shutdown/handshake/ACK tests, compact tamper/replay/packing/recovery tests, three compact parser fuzz targets, privileged raw sockets, and manager/installer checks.
+All execution uses disposable GitHub Linux runners; no local Go/Python toolchain or reference binary was installed or executed. Both amd64 and arm64 have direct compact tamper/replay/packing/recovery, fuzz, privileged raw socket and manager/installer evidence. The aggregate race/audit and repeated ACK/lifecycle steps need rerunning after the CI correction above.
 
 | Exact source | Run | Network observations |
 | --- | --- | --- |
@@ -50,7 +52,9 @@ The fourth run, [37270835983](https://github.com/MmdHoss3in/ggstunnel/actions/ru
 
 The fourth run also exposed an accounting defect in the test: iperf warmup omission resets counters between interval boundaries, so even summing retained omitted intervals can miss application bytes. Its NIC/application ratios are invalid for whole-transfer billing comparisons. The test now uses separate zero-omit accounting cases and rejects receiver interval totals that do not equal the end-of-transfer receiver total. Earlier NIC/inner-IP comparisons are unaffected.
 
-The fifth run, [37273743286](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37273743286), completed 92 network observations from `2c3564345fdba063d69514405780c96530160e5b`. All code, manager and native socket checks passed. Four compact stateful cases failed at 27.2..82.1 Mbps; one arm64 compact asymmetric case also failed at 10.3 Mbps. The corrected zero-omit accounting cases passed receiver-byte consistency checks: NIC/application ratios were 1.214..1.271 for legacy and 1.189..1.241 for compact. Thus even clean samples do not support a 15% whole-application overhead guarantee. The latest change retains one randomized ICMP identifier per 65536-sequence epoch and permutes the sequence within it, rather than allocating a different conntrack flow for each packet. Its native effect still needs measurement.
+The fifth run, [37273743286](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37273743286), completed 92 network observations from `2c3564345fdba063d69514405780c96530160e5b`. Manager and native socket checks passed; the aggregate code-test pass was invalid as explained in the CI correction. Four compact stateful cases failed at 27.2..82.1 Mbps; one arm64 compact asymmetric case also failed at 10.3 Mbps. The corrected zero-omit accounting cases passed receiver-byte consistency checks: NIC/application ratios were 1.214..1.271 for legacy and 1.189..1.241 for compact. Thus even clean samples do not support a 15% whole-application overhead guarantee. The latest change retains one randomized ICMP identifier per 65536-sequence epoch and permutes the sequence within it, rather than allocating a different conntrack flow for each packet. Its native effect still needs measurement.
+
+The focused sixth run, [37275706904](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37275706904), measured 24 compact network cases from `b1b96a5fb6d58a260f2ffdaaa1e9b1305ca1b02e`. All four stateful cases now passed at 108.2..114.3 Mbps with four router conntrack entries at the end of each sample. Clean 500 Mbps cases reached 388.2..424.9 Mbps. The arm64 asymmetric forward case still failed at 10.3 Mbps; the other asymmetric cases passed at 142.4..156.7 Mbps. Whole-application ratios remained 1.189..1.256. This run also predates the pipefail/test-fixture correction and is not a complete code-suite pass. Identifier stabilization improved these stateful observations but did not resolve every path or the overhead goal.
 
 ## Remaining limits and release requirements
 
@@ -59,3 +63,4 @@ At 0.2% random loss, compact useful throughput in the third run was only 6.3..9.
 Before a new release: finish the asymmetric/stateful and application-accounting run, validate the latest receive-path optimization, apply the cloud gofmt patch, run the complete release matrix against the final source, and make the compact filter status explicit. Preserve exact source hashes and raw results. Keep legacy interoperability and rollback documented.
 
 Short cloud tests cannot establish 95% confidence for multiday Iran/foreign deployments without a sampling model and representative field data. A stable label must not imply those unperformed tests.
+
