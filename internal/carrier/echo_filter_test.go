@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"ggstunnel/internal/session"
 )
 
 func TestBIPCloseWaitsForActorBeforeRemovingEchoFilter(t *testing.T) {
@@ -264,5 +266,148 @@ func TestCompactEchoFilterCannotRotateWithoutFreshProof(t *testing.T) {
 	b.issueChallenge(wirePacket{sender: 456, typ: 8}, time.Now())
 	if calls != 0 || b.compactEchoFilter.current != nil {
 		t.Fatal("unproven rotation changed active echo filter")
+	}
+}
+
+func TestCompactEchoFilterOnlyFollowsAuthenticatedHandshake(t *testing.T) {
+	a, b := compactPair(t)
+	b.emit = func([]byte) error { return nil }
+	t.Cleanup(func() { a.Close(); b.Close() })
+	calls := 0
+	b.compactEchoFilter = compactFilterForTest(t, t.TempDir(), "net:[16]", func(args []string) error {
+		calls++
+		if args[2] == "-C" {
+			return errEchoRuleMissing
+		}
+		return nil
+	})
+	now := time.Now()
+	hello := wirePacket{typ: 8, kind: bipKindHello, sender: a.localID, number: 1, id: 10, tuple: 20, payload: []byte{a.localRole()}}
+	wire, err := a.encode(hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := append([]byte(nil), wire...)
+	bad[len(bad)-1] ^= 1
+	b.handle(bad, now)
+	if calls != 0 {
+		t.Fatal("unauthenticated packet installed a filter")
+	}
+	wrong := hello
+	wrong.number = 2
+	wrong.payload = []byte{b.localRole()}
+	wrongWire, err := a.encode(wrong)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.handle(wrongWire, now)
+	if calls != 0 {
+		t.Fatal("wrong-role HELLO installed a filter")
+	}
+	b.handle(wire, now)
+	remoteMask, _ := b.aliasMask(b.remoteRole())
+	if !b.kernelEchoFilter.Load() || b.compactEchoFilter.current == nil || b.compactEchoFilter.current.Alias != a.localID^remoteMask {
+		t.Fatal("authenticated bootstrap did not install the remote alias")
+	}
+	accept := func(peer *BIP) {
+		t.Helper()
+		c, err := b.gate.IssueReusable(peer.localID, b.remoteRole(), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof := session.Proof(b.master, c)
+		p := wirePacket{typ: 8, kind: bipKindProof, sender: peer.localID, target: b.localID, number: 3, id: 10, tuple: 21, payload: append(marshalChallenge(c), proof[:]...)}
+		body, err := peer.encode(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.handle(body, now)
+		if b.active != peer.localID {
+			t.Fatal("valid fresh proof did not activate peer")
+		}
+	}
+	accept(a)
+	other, spare := compactPair(t)
+	t.Cleanup(func() { other.Close(); spare.Close() })
+	old := b.compactEchoFilter.current.Alias
+	count := calls
+	hello.sender = other.localID
+	wire, err = other.encode(hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.handle(wire, now)
+	if calls != count || b.compactEchoFilter.current.Alias != old {
+		t.Fatal("unproven candidate rotated the active filter")
+	}
+	accept(other)
+	if b.compactEchoFilter.current.Alias != other.localID^remoteMask || b.compactEchoFilter.current.Alias == old {
+		t.Fatal("fresh proof did not rotate the alias")
+	}
+	count = calls
+	hello.sender = a.localID
+	hello.number = 4
+	wire, err = a.encode(hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.handle(wire, now)
+	if calls != count || b.compactEchoFilter.current.Alias != other.localID^remoteMask {
+		t.Fatal("retired peer replay changed the filter")
+	}
+}
+
+func TestCompactEchoFilterFailedRotationKeepsOldCleanupRecipe(t *testing.T) {
+	dir := t.TempDir()
+	denyDelete := false
+	inserts := 0
+	run := func(args []string) error {
+		if args[2] == "-I" {
+			inserts++
+		}
+		if args[2] == "-D" && denyDelete {
+			return errors.New("firewall lock unavailable")
+		}
+		return nil
+	}
+	f := compactFilterForTest(t, dir, "net:[17]", run)
+	now := time.Now()
+	if ok, err := f.update(88, 99, now); !ok || err != nil {
+		t.Fatal(err)
+	}
+	denyDelete = true
+	if ok, err := f.update(111, 99, now); ok || err == nil {
+		t.Fatal("failed old-rule deletion allowed rotation")
+	}
+	r, err := readCompactEchoRecord(filepath.Join(dir, f.base.filename()))
+	if err != nil || r.Alias != 88 || inserts != 1 {
+		t.Fatal("failed rotation lost the old exact rule recipe", err)
+	}
+	denyDelete = false
+	if ok, err := f.update(111, 99, now.Add(31*time.Second)); !ok || err != nil {
+		t.Fatal("rotation did not recover", err)
+	}
+	if inserts != 2 || f.current.Alias != 111 {
+		t.Fatal("recovered rotation did not replace the rule")
+	}
+	if err := f.close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCompactEchoFilterRejectsInvalidStoredScope(t *testing.T) {
+	dir := t.TempDir()
+	r := compactEchoRecord{Schema: 1, Namespace: "net:[18]", Local: "192.0.2.1", Peer: "198.51.100.1", Instance: "ggs01", Alias: 66}
+	path := filepath.Join(dir, r.filename())
+	if err := os.WriteFile(path, []byte(`{"schema":1,"namespace":"net:[18]","local":"0.0.0.0/0","peer":"198.51.100.1","instance":"ggs01","alias":66}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	err := cleanupCompactEchoRecords(dir, "ggs01", "net:[18]", func([]string) error { calls++; return nil })
+	if err == nil || calls != 0 {
+		t.Fatal("invalid stored scope reached the firewall")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("invalid recipe was silently discarded")
 	}
 }

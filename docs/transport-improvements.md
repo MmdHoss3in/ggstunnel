@@ -80,8 +80,14 @@ Run 37283720361 also ended timed packed-frame fuzzing with a coordinator context
 
 ## Remaining limits and release requirements
 
+### Compact echo-filter validation
+
+[37299509110](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37299509110) tested `d0f24b7` with the authorized compact filter. Both architectures passed the complete race/audit suite, compact regressions, fuzzing, 41 manager tests, raw socket checks and actual syscall verification. Native scope tests preserved ordinary ping, genuine local-alias replies, inner DATA/ACK transfers and unrelated peers/rules. Peer rotation removed the old alias rule; normal stop and actual systemd SIGKILL removed the owned rule and metadata.
+
+All 48 fresh repeated asymmetric/stateful observations passed on 200 Mbps links with 80 ms RTT. Whole-transfer accounting and the full exact-source release matrix still require their own final run. The preceding unfiltered source `50f0cae` passed its full 92-observation network matrix but one independent compact/stateful arm64 repetition delivered 99.689 Mbps below the 100 Mbps floor. That miss was retained and the floor was not lowered. The new filter removes redundant traffic without reducing authentication, ACK, retry or delivery guarantees.
+
 At 0.2% random loss, compact useful throughput in the third run was only 6.3..9.6 Mbps. Legacy samples also degraded severely. These checks passed a connectivity floor; they do not demonstrate 100..200 Mbps under loss. Ordered delivery shared by all BIP traffic still causes head-of-line blocking. Removing that ordering blindly would also violate the inner replay-window/fragmentation assumptions. Independent delivery lanes need a separate protocol design and representative tests.
 
-Before a new release: pass the full asymmetric/stateful matrix with the latest startup fix, verify cloud formatting, run every release gate against the final tagged source, and explicitly document compact's experimental status and measured overhead. Preserve exact source hashes and raw results. Keep legacy interoperability and rollback documented. The optional compact filter and further overhead reductions are separate work, not reasons to compromise quality or invent a 15% guarantee.
+Before a new release: pass the full asymmetric/stateful matrix with the latest startup fix and compact filter, verify cloud formatting, run every release gate against the final tagged source, and explicitly document compact's experimental status and measured overhead. Preserve exact source hashes and raw results. Keep legacy interoperability and rollback documented. Further overhead reductions must preserve quality; no universal 15% guarantee is established.
 
 Short cloud tests cannot establish 95% confidence for multiday Iran/foreign deployments without a sampling model and representative field data. A stable label must not imply those unperformed tests.
