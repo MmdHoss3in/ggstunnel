@@ -17,7 +17,7 @@ jobs:
   transport-validation:
     uses: ./.github/workflows/compact-validation.yml
   field-performance-validation:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.head_ref == 'feature/compact-wire'
     uses: ./.github/workflows/field-performance.yml
   extended-validation:
     if: github.head_ref != 'fix/bip-silent-recovery' && (github.ref != 'refs/heads/release/rc5' || contains(github.event.head_commit.message, '[cloud-matrix]'))

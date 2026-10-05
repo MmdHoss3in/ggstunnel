@@ -70,7 +70,10 @@ jobs:
           cat field-artifacts/stats-baseline.log
           test "$result" -ne 0
           grep -q 'counted historical traffic' field-artifacts/stats-baseline.log
-          cp internal/carrier/bip_integration_test.go internal/carrier/strict_stateful_test.go "$BASE/internal/carrier/"
+          # Keep the simulation helper compatible with the historical runtime:
+          # the new helper also calls compact-only methods absent from rc1.
+          git show v0.3.1:internal/carrier/bip_integration_test.go > "$BASE/internal/carrier/bip_integration_test.go"
+          cp internal/carrier/strict_stateful_test.go "$BASE/internal/carrier/"
           set +e
           (cd "$BASE" && go test ./internal/carrier -run '^(TestBIPSingleReplyStatefulHandshake|TestFASTReplyRetriesAvoidBlockedRequestDirection)$' -count=1 -timeout 15s -v) > field-artifacts/path-baseline.log 2>&1
           result=$?
