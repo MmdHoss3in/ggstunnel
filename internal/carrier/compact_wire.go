@@ -28,6 +28,9 @@ type compactKeys struct {
 	aead   cipher.AEAD
 	header cipher.Block
 	tuple  cipher.Block
+	tupleEpoch uint16
+	tupleID uint16
+	tupleEpochReady bool
 }
 
 func wireVersion(c *config.Config) uint16 {
@@ -99,19 +102,24 @@ func (b *BIP) compactKeysFor(id uint64, role byte) (*compactKeys, error) {
 	return &compactKeys{id: id, role: role, alias: id ^ mask, aead: aead, header: header, tuple: tuple}, nil
 }
 
-// Four-round keyed Feistel permutation: unique request tuples without a
-// visibly increasing sequence. Replies still copy the request tuple exactly.
+// Domain-separated 16-bit Feistel permutations preserve unique request tuples.
+// Keep the identifier fixed within a 65536-sequence epoch: randomizing it on
+// every packet creates excessive ICMP conntrack flows on intermediate routers.
+// Replies still copy the request tuple exactly.
 // This is not a substitute for authentication or for header encryption.
 func permuteCompactTuple(block cipher.Block, counter uint32) uint32 {
-	left, right := uint16(counter>>16), uint16(counter)
+	return uint32(permuteCompactHalf(block,uint16(counter>>16),0))<<16 | uint32(permuteCompactHalf(block,uint16(counter),1))
+}
+
+func permuteCompactHalf(block cipher.Block, value uint16, domain byte)uint16 {
+	left,right:=byte(value>>8),byte(value)
 	var in, out [16]byte
 	for round := byte(0); round < 4; round++ {
-		in[0] = round
-		binary.BigEndian.PutUint16(in[1:3], right)
+		in[0],in[1],in[2]=domain,round,right
 		block.Encrypt(out[:], in[:])
-		left, right = right, left^binary.BigEndian.Uint16(out[:2])
+		left,right=right,left^out[0]
 	}
-	return uint32(left)<<16 | uint32(right)
+	return uint16(left)<<8|uint16(right)
 }
 
 func (b *BIP) nextCompactTuple() (uint16, uint16) {
@@ -130,8 +138,12 @@ func (b *BIP) nextCompactTuple() (uint16, uint16) {
 		b.fail(frame.ErrKeyLifetime)
 		return 0, 0
 	}
-	tuple := permuteCompactTuple(k.tuple, uint32(b.compactTupleNo))
-	return uint16(tuple >> 16), uint16(tuple)
+	counter:=uint32(b.compactTupleNo)
+	epoch:=uint16(counter>>16)
+	if !k.tupleEpochReady || k.tupleEpoch!=epoch {
+		k.tupleEpoch,k.tupleID,k.tupleEpochReady=epoch,permuteCompactHalf(k.tuple,epoch,0),true
+	}
+	return k.tupleID,permuteCompactHalf(k.tuple,uint16(counter),1)
 }
 
 func compactNonce(alias uint64, number uint32) [12]byte {

@@ -19,6 +19,8 @@ def main():
     cases=[(*case,'clean') for case in cases]
     cases += [('bip',p,200,d,'0%',wire,'accounting') for p in (1280,1348) for d in (False,True) for wire in ('legacy','compact')]
     cases += [('bip',1348,200,d,'0%',wire,mode) for wire in ('legacy','compact') for mode in ('asymmetric','stateful') for d in (False,True)]
+    if os.environ.get('GGS_TRANSPORT_FOCUS')=='compact-recovery':
+        cases=[c for c in cases if c[5]=='compact' and (c[6]!='clean' or (c[1]==1348 and c[4]=='0%'))]
     rows=[];failures=[]
     for profile,payload,rate,reverse,loss,wire,mode in cases:
         warmup=0 if mode=='accounting' else 2
@@ -49,6 +51,8 @@ def main():
                            accounting_scope='NIC rx bytes / whole-transfer receiver TCP payload bytes; zero omit only; NIC includes link headers and idle control' if app_bytes else 'Whole-transfer application accounting unavailable with iperf warmup omission')
                 recoveries=[v.get('telemetry',{}).get('internal_recoveries',0)-u.get('telemetry',{}).get('internal_recoveries',0) for u,v in zip(before['peers'],after['peers'])]
                 same=[u.get('pid') for u in before['peers']]==[v.get('pid') for v in after['peers']]
+                if mode=='stateful':
+                    row['router_conntrack_entries_end']=int(run('ip','netns','exec',pair.router,'cat','/proc/sys/net/netfilter/nf_conntrack_count').stdout)
                 floor=(100 if rate==200 else 200) if profile=='bip' and loss=='0%' else (1 if loss!='0%' else 30)
                 row.update(internal_recoveries=recoveries,processes_unchanged=same,status='pass' if result['received_mbps']>=floor and same and not any(recoveries) else 'fail')
         except Exception as exc: row.update(status='fail',reason=str(exc))

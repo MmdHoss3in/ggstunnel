@@ -112,6 +112,26 @@ func TestCompactPeerReplyDoesNotDeriveAnOwnReflectionKey(t *testing.T) {
 	}
 }
 
+func TestCompactIdentifierEpochBoundsConntrackFlows(t *testing.T) {
+	a,_:=compactPair(t)
+	id,seq:=a.nextCompactTuple()
+	seen:=map[uint16]bool{seq:true}
+	for i:=2;i<65536;i++ {
+		nextID,nextSeq:=a.nextCompactTuple()
+		if nextID!=id || seen[nextSeq]{t.Fatalf("unstable identifier or repeated sequence at %d",i)}
+		seen[nextSeq]=true
+	}
+	nextID,_:=a.nextCompactTuple()
+	if nextID==id{t.Fatal("identifier did not rotate at epoch boundary")}
+	keys:=a.compactSend
+	for _,counter:=range []uint32{1,65535,65536,65537,0xffffffff} {
+		a.compactTupleNo=uint64(counter)-1
+		gotID,gotSeq:=a.nextCompactTuple()
+		want:=permuteCompactTuple(keys.tuple,counter)
+		if uint32(gotID)<<16|uint32(gotSeq)!=want {t.Fatal("cached epoch differs from tuple permutation")}
+	}
+}
+
 func TestCompactEncryptedFramePackingAndReplay(t *testing.T) {
 	a, b := compactPair(t)
 	sender, _ := frame.NewCodec(a.cfg.PSK)
