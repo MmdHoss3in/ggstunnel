@@ -268,6 +268,7 @@ func (c *Config) ApplyDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if c.Profile != "bip" && c.Transport.BIPWireMode == "compact" {return errors.New("compact wire currently requires profile bip")}
 	if len(c.Forwards) > 128 {
 		return errors.New("at most 128 forward rules")
 	}

@@ -73,7 +73,7 @@ func (u *UDP) fail(err error) {
 	default:
 	}
 }
-func (u *UDP) readLoop(ctx context.Context) {
+func (u *UDP) readLoopScalar(ctx context.Context) {
 	buf := make([]byte, 65535)
 	for {
 		n, src, err := u.conn.ReadFromUDP(buf)
@@ -100,7 +100,7 @@ func (u *UDP) readLoop(ctx context.Context) {
 		}
 	}
 }
-func (u *UDP) writeLoop(ctx context.Context) {
+func (u *UDP) writeLoopScalar(ctx context.Context) {
 	for {
 		select {
 		case b := <-u.tx:

@@ -13,14 +13,19 @@ def main():
     cases=[('bip',p,r,d,'0%') for p in (1280,1348) for r in (200,500) for d in (False,True)]
     cases += [(p,1280,200,d,'0%') for p in ('tcp','udp','icmp','gre','ipip') for d in (False,True)]
     cases += [('bip',p,200,True,'0.2%') for p in (1280,1348)]
+    cases=[(*case,'legacy') for case in cases]
+    cases += [('bip',p,r,d,'0%','compact') for p in (1280,1348) for r in (200,500) for d in (False,True)]
+    cases += [('bip',p,200,True,'0.2%','compact') for p in (1280,1348)]
     rows=[];failures=[]
-    for profile,payload,rate,reverse,loss in cases:
-        row=dict(profile=profile,payload=payload,link_mbps=rate,reverse=reverse,loss=loss,architecture=ARCH,base_rtt_ms=80,sample_sec=8,warmup_sec=2)
+    for profile,payload,rate,reverse,loss,wire in cases:
+        row=dict(profile=profile,payload=payload,link_mbps=rate,reverse=reverse,loss=loss,wire=wire,architecture=ARCH,base_rtt_ms=80,sample_sec=8,warmup_sec=2)
         try:
             with Pair(profile) as pair:
                 for i in range(2):
                     path=pair.path/f'{i}.json';cfg=json.loads(path.read_text())
-                    cfg['performance']['max_frame_payload']=payload;cfg['tun']['mtu']=payload;path.write_text(json.dumps(cfg))
+                    cfg['performance']['max_frame_payload']=payload;cfg['tun']['mtu']=payload
+                    if wire=='compact':cfg['transport']['bip_wire_mode']='compact'
+                    path.write_text(json.dumps(cfg))
                 pair.shape(rate,80,loss=loss);pair.restart();time.sleep(1.2)
                 side=0 if reverse else 1
                 before=pair.sample();n0=nic(pair,side);began=time.monotonic()

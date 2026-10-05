@@ -131,21 +131,28 @@ def encode_join(c):
     data = dict(v=2, index=int(c['tun']['name'][3:]), profile=c['profile'], server=c['real']['local_ip'],
                 peer=c['real']['peer_ip'], port=c['transport']['l4_port'], psk=c['psk'],
                 mtu=c['tun']['mtu'], payload=c['performance']['max_frame_payload'])
+    # Compact is explicit on both ends; older managers must reject this code.
+    compact = c['profile']=='bip' and c['transport'].get('bip_wire_mode')=='compact'
+    if compact: data.update(v=3, wire='compact')
     raw = json.dumps(data, sort_keys=True, separators=(',', ':')).encode()
-    return 'GGS2.' + base64.urlsafe_b64encode(raw).decode().rstrip('=') + '.' + hashlib.sha256(raw).hexdigest()[:16]
+    return ('GGS3.' if compact else 'GGS2.') + base64.urlsafe_b64encode(raw).decode().rstrip('=') + '.' + hashlib.sha256(raw).hexdigest()[:16]
 
 def decode_join(token, local=None):
     if len(token) > 4096: raise ValueError('Join code too long')
     prefix, encoded, digest = token.strip().split('.')
-    if prefix != 'GGS2': raise ValueError('Unknown join code format')
+    if prefix not in ('GGS2','GGS3'): raise ValueError('Unknown join code format')
     raw = base64.b64decode(encoded + '=' * (-len(encoded) % 4), altchars=b'-_', validate=True)
     if not secrets.compare_digest(hashlib.sha256(raw).hexdigest()[:16], digest): raise ValueError('Join code checksum mismatch')
     d = json.loads(raw)
-    if set(d) != {'v','index','profile','server','peer','port','psk','mtu','payload'} or d['v'] != 2:
+    fields = {'v','index','profile','server','peer','port','psk','mtu','payload'}
+    compact = prefix=='GGS3'
+    if set(d) != (fields|{'wire'} if compact else fields) or d['v'] != (3 if compact else 2):
         raise ValueError('Unsupported join data')
+    if compact and (d['profile']!='bip' or d['wire']!='compact'): raise ValueError('Unsupported compact join mode')
     c = make_config(d['index'], d['profile'], d['server'], d['peer'], d['port'], d['psk'], 'client', local)
     c['tun']['mtu'] = integer(d['mtu'], 576, 1500)
     c['performance']['max_frame_payload'] = integer(d['payload'], 256, 1348)
+    if compact: c['transport']['bip_wire_mode']='compact'
     return c
 
 def active(name): return run(['systemctl', 'is-active', '--quiet', unit(name)], check=False).returncode == 0
@@ -581,7 +588,7 @@ def ask(label,default=''):
 
 def menu():
     while True:
-        print('\nGGSTUNNEL '+VERSION+'\n1 Create Iran tunnel  2 Join from foreign  3 Status\n4 Start temporarily  5 Stop temporarily  6 Restart\n7 ON + boot enable  8 OFF + boot disable  9 Edit / forwards / restore config\n10 Delete tunnel  11 Show join code  12 Logs  13 Diagnostic report\n14 Capacity listener  15 Capacity test  16 Apply network tuning\n17 Restore tuning  18 Update from extracted package  19 Rollback release\n20 Sustained capacity test (10 minutes each direction/protocol)\n21 Apply BIP performance defaults to existing tunnels\n0 Exit\nActions 4-8 accept tunnel name or all. Temporary stop lasts until manual start or reboot.')
+        print('\nGGSTUNNEL '+VERSION+'\n1 Create Iran tunnel  2 Join from foreign  3 Status\n4 Start temporarily  5 Stop temporarily  6 Restart\n7 ON + boot enable  8 OFF + boot disable  9 Edit / forwards / restore config\n10 Delete tunnel  11 Show join code  12 Logs  13 Diagnostic report\n14 Capacity listener  15 Capacity test  16 Apply network tuning\n17 Restore tuning  18 Update from extracted package  19 Rollback release\n20 Sustained capacity test (10 minutes each direction/protocol)\n21 Apply BIP performance defaults to existing tunnels\n22 Experimental BIP wire mode / payload\n0 Exit\nActions 4-8 accept tunnel name or all. Temporary stop lasts until manual start or reboot.')
         try: choice=ask('Choice')
         except (EOFError, KeyboardInterrupt): print(); return
         if choice=='0':return
@@ -605,12 +612,28 @@ def menu():
                 elif choice=='18':install(ask('Extracted package source directory'))
                 elif choice=='19':rollback();return
                 elif choice=='21':optimize_existing()
+                elif choice=='22':configure_wire(select_name())
                 elif choice=='20':capacity(select_name(),'client',(integer(ask('Rate Mbps','100'),1,1000),),600)
                 else: raise ValueError('Unknown menu option')
             if choice == '18':
                 os.execv('/usr/local/bin/ggstunnel', ['ggstunnel'])
                 return
         except (Exception,KeyboardInterrupt) as e:print('ERROR:',str(e) or 'Interrupted')
+
+def configure_wire(name):
+    c=configs()[name]
+    if c['profile']!='bip':raise ValueError('Compact wire is currently available for BIP only')
+    print('Experimental compact mode requires the same mode on both updated peers; switching one side interrupts traffic.')
+    print('Legacy 1348 requires outer MTU 1500. No automatic PMTU discovery. Default 1280 is safer.')
+    print('The legacy kernel echo filter is not applicable to compact mode; actual overhead must be measured.')
+    mode=ask('Wire mode: legacy / compact',c['transport'].get('bip_wire_mode') or 'legacy')
+    if mode not in ('legacy','compact'):raise ValueError('Unknown wire mode')
+    payload=integer(ask('Payload and TUN MTU','1280'),576,1348)
+    if mode=='compact':c['transport']['bip_wire_mode']='compact'
+    else:c['transport'].pop('bip_wire_mode',None)
+    c['performance']['max_frame_payload']=payload;c['tun']['mtu']=payload
+    save_config(c,True)
+    if c['role']=='server':print('Replace the foreign config with this SECRET join code:\n'+encode_join(c))
 
 def optimize_existing():
     for c in configs().values():

@@ -260,6 +260,7 @@ func (b *BIP) Name() string         { return "bip" }
 func (b *BIP) Recv() <-chan []byte  { return b.rx }
 func (b *BIP) Errors() <-chan error { return b.errors }
 func (b *BIP) Send(p []byte) error {
+	select {case <-b.closed:return ErrClosed;default:}
 	if len(p) == 0 || len(p) > b.cfg.Performance.MaxFramePayload+60 {
 		return errors.New("BIP frame too large")
 	}
@@ -298,6 +299,7 @@ func (b *BIP) SendContext(ctx context.Context, p []byte) error {
 func (b *BIP) Start(ctx context.Context) error {
 	b.startMu.Lock()
 	defer b.startMu.Unlock()
+	select {case <-b.closed:return ErrClosed;case <-ctx.Done():return ctx.Err();default:}
 	if b.started {
 		return errors.New("already started")
 	}
@@ -362,6 +364,7 @@ func (b *BIP) Start(ctx context.Context) error {
 func (b *BIP) StartPacketIO(ctx context.Context, backend PacketIO) error {
 	b.startMu.Lock()
 	defer b.startMu.Unlock()
+	select {case <-b.closed:return ErrClosed;case <-ctx.Done():return ctx.Err();default:}
 	if b.started || backend == nil {
 		return errors.New("invalid packet backend")
 	}
@@ -445,6 +448,8 @@ func (b *BIP) readLoopScalar(ctx context.Context) {
 }
 func (b *BIP) Close() error {
 	b.closeOnce.Do(func() {
+		b.startMu.Lock()
+		defer b.startMu.Unlock()
 		if b.closed != nil {
 			close(b.closed)
 		}

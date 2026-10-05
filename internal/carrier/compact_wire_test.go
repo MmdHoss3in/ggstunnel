@@ -94,3 +94,30 @@ func TestCompactTuplePermutationIsUniqueAndSessionSpecific(t *testing.T){
 	a.nextTuple()
 	if before==permuteCompactTuple(a.compactSend.tuple,17){t.Fatal("new session retained tuple mapping")}
 }
+
+func TestCompactShortOutageAndPeerRestart(t *testing.T){
+	ctx,cancel:=context.WithCancel(context.Background());defer cancel()
+	l:=&simLink{adaptive:true,copies:2,requests:make(map[[3]uint16]time.Time)}
+	l.configure=func(c *config.Config){c.Transport.BIPWireMode="compact"}
+	a:=l.start(t,0,ctx);b:=l.start(t,1,ctx)
+	waitFor(t,func()bool{return a.PeerSession()==b.localID && b.PeerSession()==a.localID})
+	blocked:=true;l.mu.Lock();l.filter=func(int,[]byte)bool{return !blocked};l.mu.Unlock()
+	if err:=a.Send([]byte("retained during outage"));err!=nil{t.Fatal(err)}
+	time.Sleep(300*time.Millisecond)
+	l.mu.Lock();blocked=false;l.mu.Unlock()
+	select{case got:=<-b.Recv():if string(got)!="retained during outage"{t.Fatal("payload changed")};case <-time.After(3*time.Second):t.Fatal("outage did not resume")}
+	waitFor(t,func()bool{return a.SnapshotStats().Pending==0})
+	b.Close();fresh:=l.start(t,1,ctx)
+	waitFor(t,func()bool{return a.PeerSession()==fresh.localID && fresh.PeerSession()==a.localID})
+	if err:=fresh.Send([]byte("new authenticated peer"));err!=nil{t.Fatal(err)}
+	select{case got:=<-a.Recv():if string(got)!="new authenticated peer"{t.Fatal("restart payload changed")};case <-time.After(3*time.Second):t.Fatal("peer restart did not resume")}
+}
+
+func TestCompactDoesNotDowngradeToLegacyPeer(t *testing.T){
+	ctx,cancel:=context.WithCancel(context.Background());defer cancel()
+	l:=&simLink{copies:1,requests:make(map[[3]uint16]time.Time)}
+	l.configure=func(c *config.Config){c.Transport.BIPHandshakeTimeoutSec=1;if c.Role=="server"{c.Transport.BIPWireMode="compact"}}
+	a:=l.start(t,0,ctx);l.start(t,1,ctx)
+	select{case err:=<-a.Errors():if !errors.Is(err,ErrBIPHandshakeTimeout){t.Fatal(err)};case <-time.After(3*time.Second):t.Fatal("mixed wire modes hung forever")}
+	if a.PeerSession()!=0 || !a.compactMode(){t.Fatal("unauthenticated downgrade occurred")}
+}

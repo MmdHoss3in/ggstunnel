@@ -169,7 +169,7 @@ func (r *rawCarrier) unwrap(b []byte) ([]byte, bool) {
 	}
 	return nil, false
 }
-func (r *rawCarrier) readLoop(ctx context.Context) {
+func (r *rawCarrier) readLoopScalar(ctx context.Context) {
 	buf := make([]byte, 65535)
 	for {
 		_ = r.conn.SetReadDeadline(time.Now().Add(time.Second))
@@ -207,7 +207,7 @@ func (r *rawCarrier) readLoop(ctx context.Context) {
 		}
 	}
 }
-func (r *rawCarrier) writeLoop(ctx context.Context) {
+func (r *rawCarrier) writeLoopScalar(ctx context.Context) {
 	for {
 		select {
 		case b := <-r.tx:

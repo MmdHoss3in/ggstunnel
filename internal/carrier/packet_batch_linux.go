@@ -4,6 +4,7 @@ package carrier
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"log"
 	"net"
@@ -26,6 +27,7 @@ type bipSocketBatch struct {
 	data [bipReceiveBatch][2048]byte
 	iov  [bipReceiveBatch]syscall.Iovec
 	msg  [bipReceiveBatch]bipMessage
+	addresses [bipReceiveBatch]syscall.RawSockaddrInet4
 }
 
 func newBIPSocketBatch() *bipSocketBatch {
@@ -43,6 +45,7 @@ func (b *bipSocketBatch) read(fd uintptr) (int, error) {
 	for i := range b.msg {
 		b.msg[i].header.Flags = 0
 		b.msg[i].length = 0
+		if b.msg[i].header.Name != nil { b.msg[i].header.Namelen = syscall.SizeofSockaddrInet4 }
 	}
 	n, _, errno := syscall.Syscall6(syscall.SYS_RECVMMSG, fd, uintptr(unsafe.Pointer(&b.msg[0])), bipReceiveBatch, syscall.MSG_DONTWAIT, 0, 0)
 	runtime.KeepAlive(b)
@@ -53,6 +56,10 @@ func (b *bipSocketBatch) read(fd uintptr) (int, error) {
 }
 
 func sendBIPMessages(fd int, packets [][]byte, peer net.IP) (int, error) {
+	return sendIPv4Messages(fd,packets,peer,0)
+}
+
+func sendIPv4Messages(fd int, packets [][]byte, peer net.IP, port int) (int, error) {
 	if len(packets) == 0 {
 		return 0, nil
 	}
@@ -62,6 +69,7 @@ func sendBIPMessages(fd int, packets [][]byte, peer net.IP) (int, error) {
 	var messages [64]bipMessage
 	var iov [64]syscall.Iovec
 	address := syscall.RawSockaddrInet4{Family: syscall.AF_INET}
+	var portBytes [2]byte;binary.BigEndian.PutUint16(portBytes[:],uint16(port));address.Port=binary.NativeEndian.Uint16(portBytes[:])
 	if peer != nil {
 		if peer.To4() == nil {
 			return 0, syscall.EINVAL
