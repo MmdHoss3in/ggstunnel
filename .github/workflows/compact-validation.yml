@@ -71,6 +71,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y iperf3 ethtool iptables strace
+          sudo env GITHUB_ACTIONS=true python3 scripts/smoke_echo_filter.py
           strace -f -qq -e trace=sendmmsg -o transport-artifacts/udp-burst-syscalls.log /tmp/ggs-carrier.test -test.run '^TestUDPQueuedBurstKeepsDatagramBoundaries$' -test.v
           python3 scripts/verify_batch_syscalls.py transport-artifacts/udp-burst-syscalls.log
           sudo env GITHUB_ACTIONS=true GGS_TRANSPORT_FOCUS="${{ github.ref == 'refs/heads/feature/compact-wire' && contains(github.event.head_commit.message, '[startup-focus]') && 'startup-recovery' || github.ref == 'refs/heads/feature/compact-wire' && contains(github.event.head_commit.message, '[compact-focus]') && 'compact-recovery' || '' }}" python3 scripts/transport_validation.py

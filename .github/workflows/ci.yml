@@ -110,7 +110,7 @@ jobs:
           bash scripts/build-release.sh
           python3 -m unittest discover -s scripts -p 'test_*.py' -v
           sudo apt-get update -qq
-          sudo apt-get install -y iptables ethtool
+          sudo apt-get install -y iptables ethtool iperf3
           sudo env GITHUB_ACTIONS=true python3 scripts/smoke_systemd.py
           sudo env GITHUB_ACTIONS=true python3 scripts/smoke_echo_filter.py
           printf '0\n' | sudo /usr/local/bin/ggstunnel
