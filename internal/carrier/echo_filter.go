@@ -44,11 +44,19 @@ func CleanupBIPReflectionFilter(c *config.Config) error {
 	var compactErr error
 	if nsErr == nil {
 		compactErr = cleanupCompactEchoRecords(compactEchoDirectory, c.TUN.Name, namespace, runEchoRule)
-	} else { compactErr = nsErr }
-	if c.Profile != "bip" { return compactErr }
+	} else {
+		compactErr = nsErr
+	}
+	if c.Profile != "bip" {
+		return compactErr
+	}
 	err := runEchoRule(bipEchoRule(c.Real.LocalIP, c.Real.PeerIP, c.TUN.Name, "-C"))
-	if err == nil { err = runEchoRule(bipEchoRule(c.Real.LocalIP, c.Real.PeerIP, c.TUN.Name, "-D")) }
-	if errors.Is(err, errEchoRuleMissing) { err = nil }
+	if err == nil {
+		err = runEchoRule(bipEchoRule(c.Real.LocalIP, c.Real.PeerIP, c.TUN.Name, "-D"))
+	}
+	if errors.Is(err, errEchoRuleMissing) {
+		err = nil
+	}
 	return errors.Join(compactErr, err)
 }
 

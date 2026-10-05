@@ -357,7 +357,9 @@ func (b *BIP) Start(ctx context.Context) error {
 			if err == nil {
 				b.compactEchoFilter, err = newCompactEchoFilter(compactEchoDirectory, b.local.String(), b.peer.String(), b.cfg.TUN.Name, namespace, runEchoRule)
 			}
-			if err != nil { log.Printf("BIP compact echo filter unavailable: %v", err) }
+			if err != nil {
+				log.Printf("BIP compact echo filter unavailable: %v", err)
+			}
 		}
 	} else if cleanup, err := installBIPReflectionFilter(b.local.String(), b.peer.String(), b.cfg.TUN.Name, runEchoRule); err != nil {
 		log.Printf("BIP redundant kernel echo filter unavailable: %v", err)
@@ -490,7 +492,9 @@ func (b *BIP) Close() error {
 			b.echoFilterCleanup()
 		}
 		if b.compactEchoFilter != nil {
-			if err := b.compactEchoFilter.close(); err != nil { log.Printf("BIP compact echo filter cleanup: %v", err) }
+			if err := b.compactEchoFilter.close(); err != nil {
+				log.Printf("BIP compact echo filter cleanup: %v", err)
+			}
 		}
 		b.kernelEchoFilter.Store(false)
 		// The raw sender is nonblocking. Keep its descriptor valid until the
@@ -885,21 +889,33 @@ func (b *BIP) issueChallenge(p wirePacket, now time.Time) {
 	if err == nil {
 		// decode already authenticated this HELLO/CHALLENGE with the PSK.
 		// Once active, only a fresh accepted proof may rotate the rule.
-		if b.active == 0 { b.updateCompactEchoFilter(p.sender, now) }
+		if b.active == 0 {
+			b.updateCompactEchoFilter(p.sender, now)
+		}
 		_ = b.sendResponse(p, bipKindChallenge, 0, 0, marshalChallenge(c), p.sender)
 	}
 }
 
 func (b *BIP) updateCompactEchoFilter(peer uint64, now time.Time) {
-	if b.compactEchoFilter == nil || peer == 0 { return }
+	if b.compactEchoFilter == nil || peer == 0 {
+		return
+	}
 	remote, err := b.aliasMask(b.remoteRole())
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	local, err := b.aliasMask(b.localRole())
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	installed, err := b.compactEchoFilter.update(peer^remote, b.localID^local, now)
 	previous := b.kernelEchoFilter.Swap(installed)
-	if err != nil { log.Printf("BIP compact echo filter unavailable: %v", err) }
-	if installed && !previous { log.Printf("BIP compact redundant kernel echo filter enabled for authenticated outer peer") }
+	if err != nil {
+		log.Printf("BIP compact echo filter unavailable: %v", err)
+	}
+	if installed && !previous {
+		log.Printf("BIP compact redundant kernel echo filter enabled for authenticated outer peer")
+	}
 }
 func (b *BIP) handle(body []byte, now time.Time) {
 	if b.compactMode() && b.compactReflection(body) {
@@ -1212,7 +1228,9 @@ func (b *BIP) run(ctx context.Context) {
 			if b.active == 0 {
 				continue
 			}
-			if !b.kernelEchoFilter.Load() { b.updateCompactEchoFilter(b.active, now) }
+			if !b.kernelEchoFilter.Load() {
+				b.updateCompactEchoFilter(b.active, now)
+			}
 			if b.allowPacking && !b.packetPacking.Load() && now.Sub(b.lastPackOffer) >= time.Second {
 				id, tuple := b.nextTuple()
 				_ = b.send(8, id, tuple, bipKindReady, 0, 0, b.packOfferPayload(), b.active)
