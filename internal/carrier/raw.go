@@ -2,6 +2,7 @@ package carrier
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -24,6 +25,9 @@ type rawCarrier struct {
 	icmpID        uint16
 	icmpSeq       uint16
 	innerID       uint16
+	startMu sync.Mutex
+	started bool
+	workers sync.WaitGroup
 }
 
 func NewRaw(c *config.Config, kind string) (Carrier, error) {
@@ -38,25 +42,31 @@ func NewRaw(c *config.Config, kind string) (Carrier, error) {
 	default:
 		return nil, errors.New("bad raw kind")
 	}
-	return &rawCarrier{cfg: c, kind: kind, network: network, rx: make(chan []byte, c.Performance.QueueSize), tx: make(chan []byte, c.Performance.QueueSize), closeCh: make(chan struct{}), errors: make(chan error, 1), icmpID: 0x4958}, nil
+	var seed [4]byte
+	if _, err := rand.Read(seed[:]); err != nil { return nil, err }
+	return &rawCarrier{cfg: c, kind: kind, network: network, rx: make(chan []byte, c.Performance.QueueSize), tx: make(chan []byte, c.Performance.QueueSize), closeCh: make(chan struct{}), errors: make(chan error, 1), icmpID: binary.BigEndian.Uint16(seed[:2]), icmpSeq: binary.BigEndian.Uint16(seed[2:])}, nil
 }
 func (r *rawCarrier) Errors() <-chan error { return r.errors }
 func (r *rawCarrier) Name() string         { return r.kind }
 func (r *rawCarrier) Recv() <-chan []byte  { return r.rx }
-func (r *rawCarrier) Send(b []byte) error  { return enqueue(r.tx, b) }
+func (r *rawCarrier) Send(b []byte) error  { return enqueueOpen(r.closeCh, r.tx, b) }
 func (r *rawCarrier) Start(ctx context.Context) error {
+	r.startMu.Lock()
+	defer r.startMu.Unlock()
+	if r.started { return errors.New("raw carrier already started") }
+	select { case <-r.closeCh: return ErrClosed; case <-ctx.Done(): return ctx.Err(); default: }
 	local := &net.IPAddr{IP: net.ParseIP(r.cfg.Real.LocalIP).To4()}
 	peer := &net.IPAddr{IP: net.ParseIP(r.cfg.Real.PeerIP).To4()}
-	r.peer = peer
 	c, err := net.ListenIP(r.network, local)
 	if err != nil {
 		return err
 	}
-	r.conn = c
-	_ = c.SetReadBuffer(r.cfg.Transport.SockBuf)
-	_ = c.SetWriteBuffer(r.cfg.Transport.SockBuf)
-	go r.readLoop(ctx)
-	go r.writeLoop(ctx)
+	if err := c.SetReadBuffer(r.cfg.Transport.SockBuf); err != nil { c.Close(); return err }
+	if err := c.SetWriteBuffer(r.cfg.Transport.SockBuf); err != nil { c.Close(); return err }
+	r.conn, r.peer, r.started = c, peer, true
+	r.workers.Add(2)
+	go func() { defer r.workers.Done(); r.readLoop(ctx) }()
+	go func() { defer r.workers.Done(); r.writeLoop(ctx) }()
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -186,10 +196,12 @@ func (r *rawCarrier) readLoop(ctx context.Context) {
 		if !src.IP.Equal(r.peer.IP) {
 			continue
 		}
-		if p, ok := r.unwrap(buf[:n]); ok {
+		if p, ok := r.unwrap(buf[:n]); ok && len(p) > 0 && len(p) <= r.cfg.Performance.MaxFramePayload+60 {
 			cp := append([]byte(nil), p...)
 			select {
 			case r.rx <- cp:
+			case <-ctx.Done(): return
+			case <-r.closeCh: return
 			default:
 			}
 		}
@@ -217,11 +229,14 @@ func (r *rawCarrier) writeLoop(ctx context.Context) {
 }
 func (r *rawCarrier) Close() error {
 	r.closeOnce.Do(func() {
+		r.startMu.Lock()
+		defer r.startMu.Unlock()
 		close(r.closeCh)
 		if r.conn != nil {
 			_ = r.conn.Close()
 		}
 	})
+	r.workers.Wait()
 	return nil
 }
 func checksum(b []byte) uint16 {

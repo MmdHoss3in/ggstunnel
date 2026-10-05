@@ -1,0 +1,56 @@
+name: Transport IO and compact wire validation
+on:
+  push:
+    branches: [feature/compact-wire]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: compact-validation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Format in cloud and retain patch
+        run: |
+          mkdir -p transport-artifacts
+          gofmt -w cmd internal
+          git diff --binary -- cmd internal > transport-artifacts/gofmt.patch
+      - name: Static and race checks
+        run: |
+          go vet ./...
+          go test -race -tags audit -short -count=1 -timeout 5m ./... | tee transport-artifacts/race.log
+          go test -race ./internal/carrier ./internal/session -run 'Test(BIPHandshake|BIPActor|Reusable|UDPConcurrent|TCPShutdown|ACKPiggyback)' -count=10 -timeout 2m -v | tee transport-artifacts/regression.log
+      - name: Build and manager checks
+        run: |
+          bash scripts/build-release.sh
+          bash -n setup.sh install.sh scripts/build-release.sh
+          python3 scripts/check_version.py
+          python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Native socket lifecycle
+        run: |
+          go test -race -c -o /tmp/ggs-carrier.test ./internal/carrier
+          sudo env GGS_KERNEL_TEST=1 /tmp/ggs-carrier.test -test.run '^(TestRawCarrierConcurrentStartClose|TestBIPRawLoopback)$' -test.v
+      - name: Real TUN payload and carrier comparison
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool iptables
+          sudo env GITHUB_ACTIONS=true python3 scripts/transport_validation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: transport-validation-${{ matrix.runner }}
+          path: |
+            transport-artifacts/
+            extended-results/

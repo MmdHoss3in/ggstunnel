@@ -24,7 +24,7 @@ func TestRecoveryUsesFreshIdentityAndPreservesCounters(t *testing.T) {
 		if !e.recoverable(fmt.Errorf("wrapped: %w", frame.ErrKeyLifetime)) || e.recoverable(errors.New("kernel failure")) || e.recoverable(nil) {
 			t.Fatal("incorrect recovery classification")
 		}
-		for _, err := range []error{carrier.ErrBIPDeliveryTimeout, carrier.ErrBIPPeerUnresponsive, session.ErrRotationLimit} {
+		for _, err := range []error{carrier.ErrBIPDeliveryTimeout, carrier.ErrBIPPeerUnresponsive, carrier.ErrBIPHandshakeTimeout, session.ErrRotationLimit} {
 			if e.recoverable(err) != (profile == "bip") {
 				t.Fatal("BIP recovery applied to wrong transport")
 			}

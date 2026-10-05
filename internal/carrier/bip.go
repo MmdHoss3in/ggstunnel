@@ -60,6 +60,8 @@ var ErrBIPDeliveryTimeout = errors.New("BIP delivery timeout")
 // Recovery requires a fresh codec identity as well as a new carrier.
 var ErrBIPPeerUnresponsive = errors.New("BIP peer unresponsive")
 
+var ErrBIPHandshakeTimeout = errors.New("BIP authenticated handshake timeout")
+
 type outData struct {
 	flags   byte
 	data    []byte
@@ -190,6 +192,9 @@ type BIP struct {
 
 	peerSilenceMS    atomic.Int64
 	rehandshakeTries atomic.Uint64
+	startedAt time.Time
+	handshakeWaitMS atomic.Int64
+	acksCoalesced atomic.Uint64
 }
 
 func NewBIP(c *config.Config) (Carrier, error) {
@@ -386,6 +391,7 @@ func (b *BIP) startActor(ctx context.Context) context.Context {
 	}
 	ctx, b.cancel = context.WithCancel(ctx)
 	b.started = true
+	b.startedAt = time.Now()
 	b.workers.Add(1)
 	go func() { defer b.workers.Done(); b.run(ctx) }()
 	return ctx
@@ -833,7 +839,7 @@ func (b *BIP) sendResponse(p wirePacket, kind, flags byte, token uint32, payload
 }
 
 func (b *BIP) issueChallenge(p wirePacket, now time.Time) {
-	c, err := b.gate.Issue(p.sender, b.remoteRole(), now)
+	c, err := b.gate.IssueReusable(p.sender, b.remoteRole(), now)
 	if err == nil {
 		_ = b.sendResponse(p, bipKindChallenge, 0, 0, marshalChallenge(c), p.sender)
 	}
@@ -1416,6 +1422,7 @@ func (b *BIP) recordWireResult(ip []byte, success bool) {
 		return
 	}
 	b.wireTxBytes.Add(uint64(len(ip)))
+	b.coalesceAck(wirePacket{typ: body[0], kind: body[12], target: binary.BigEndian.Uint64(body[24:32]), ack: binary.BigEndian.Uint32(body[44:48]), sack: binary.BigEndian.Uint64(body[48:56])})
 	if body[12] == bipKindData {
 		b.dataWireTxBytes.Add(uint64(len(ip)))
 	} else {
@@ -1531,6 +1538,8 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 		PeerAuthenticated:     b.peerID.Load() != 0,
 		PeerSilenceMS:         b.peerSilenceMS.Load(),
 		RehandshakeTries:      b.rehandshakeTries.Load(),
+		HandshakeWaitMS:       b.handshakeWaitMS.Load(),
+		ACKsCoalesced:         b.acksCoalesced.Load(),
 		PathSuspended:         b.pathSuspended.Load(),
 		FastRetransmits:       b.fastRetries.Load(),
 		ReorderBuffered:       b.rxBuffered.Load(),

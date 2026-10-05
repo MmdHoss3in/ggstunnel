@@ -83,6 +83,7 @@ type TransportConfig struct {
 	ICMPCode         int `json:"icmp_code"`
 
 	BIPDeadTimeoutSec int `json:"bip_dead_timeout_sec"`
+	BIPHandshakeTimeoutSec int `json:"bip_handshake_timeout_sec"`
 }
 
 type PerformanceConfig struct {
@@ -217,6 +218,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Transport.BIPDeadTimeoutSec == 0 {
 		c.Transport.BIPDeadTimeoutSec = max(90, c.Transport.BIPFastTTLMS/1000+1)
+	}
+	if c.Transport.BIPHandshakeTimeoutSec == 0 {
+		c.Transport.BIPHandshakeTimeoutSec = 90
 	}
 	if c.Transport.ICMPType == 0 {
 		c.Transport.ICMPType = 8
@@ -382,6 +386,9 @@ func (c *Config) Validate() error {
 		if c.Transport.BIPDeadTimeoutSec < 1 || c.Transport.BIPDeadTimeoutSec > 86400 ||
 			time.Duration(c.Transport.BIPDeadTimeoutSec)*time.Second <= time.Duration(c.Transport.BIPFastTTLMS)*time.Millisecond {
 			return errors.New("transport.bip_dead_timeout_sec must be 1..86400 and exceed bip_fast_ttl_ms")
+		}
+		if c.Transport.BIPHandshakeTimeoutSec < 1 || c.Transport.BIPHandshakeTimeoutSec > 86400 {
+			return errors.New("transport.bip_handshake_timeout_sec must be 1..86400")
 		}
 
 		if c.Performance.MaxFramePayload > 1348 {
