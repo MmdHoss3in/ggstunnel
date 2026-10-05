@@ -16,18 +16,18 @@ import (
 )
 
 type TCP struct {
-	cfg       *config.Config
-	rx, tx    chan []byte
-	closeOnce sync.Once
-	closeCh   chan struct{}
-	ln        net.Listener
-	mu        sync.Mutex
-	sessionMu sync.Mutex
-	active    net.Conn
-	startMu sync.Mutex
-	started bool
-	cancel context.CancelFunc
-	workers sync.WaitGroup
+	cfg         *config.Config
+	rx, tx      chan []byte
+	closeOnce   sync.Once
+	closeCh     chan struct{}
+	ln          net.Listener
+	mu          sync.Mutex
+	sessionMu   sync.Mutex
+	active      net.Conn
+	startMu     sync.Mutex
+	started     bool
+	cancel      context.CancelFunc
+	workers     sync.WaitGroup
 	connections map[net.Conn]struct{}
 }
 
@@ -45,8 +45,16 @@ func (t *TCP) SendContext(ctx context.Context, b []byte) error {
 func (t *TCP) Start(ctx context.Context) error {
 	t.startMu.Lock()
 	defer t.startMu.Unlock()
-	if t.started { return fmt.Errorf("TCP carrier already started") }
-	select { case <-t.closeCh: return ErrClosed; case <-ctx.Done(): return ctx.Err(); default: }
+	if t.started {
+		return fmt.Errorf("TCP carrier already started")
+	}
+	select {
+	case <-t.closeCh:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	if t.cfg.Role == "server" {
 		ln, err := net.Listen("tcp4", t.cfg.Real.ListenAddr)
@@ -88,7 +96,11 @@ func (t *TCP) serve(ctx context.Context, ln net.Listener) {
 			c.Close()
 			continue
 		}
-		if !t.track(c) { c.Close(); <-slots; return }
+		if !t.track(c) {
+			c.Close()
+			<-slots
+			return
+		}
 		t.workers.Add(1)
 		go func() {
 			defer t.workers.Done()
@@ -123,7 +135,10 @@ func (t *TCP) dialLoop(ctx context.Context) {
 		}
 		c, err := d.DialContext(ctx, "tcp4", t.cfg.Real.PeerAddr)
 		if err == nil {
-			if !t.track(c) { c.Close(); return }
+			if !t.track(c) {
+				c.Close()
+				return
+			}
 			err = t.clientHandshake(c)
 			if err != nil {
 				c.Close()
@@ -141,7 +156,11 @@ func (t *TCP) dialLoop(ctx context.Context) {
 func (t *TCP) track(c net.Conn) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	select { case <-t.closeCh: return false; default: }
+	select {
+	case <-t.closeCh:
+		return false
+	default:
+	}
 	t.connections[c] = struct{}{}
 	return true
 }
@@ -164,7 +183,13 @@ func (t *TCP) tune(c net.Conn) {
 func (t *TCP) session(parent context.Context, c net.Conn) {
 	// Only an authenticated new connection can replace an old connection.
 	t.mu.Lock()
-	select { case <-t.closeCh: t.mu.Unlock(); c.Close(); return; default: }
+	select {
+	case <-t.closeCh:
+		t.mu.Unlock()
+		c.Close()
+		return
+	default:
+	}
 	if t.active != nil {
 		t.active.Close()
 	}
@@ -259,7 +284,7 @@ func (t *TCP) writeLoop(ctx context.Context, c net.Conn) error {
 		binary.BigEndian.PutUint32(headers[count][:], uint32(len(b)))
 		buf = append(buf, headers[count][:], b)
 		count++
-		size += 4+len(b)
+		size += 4 + len(b)
 	}
 	for {
 		select {
@@ -294,12 +319,20 @@ func (t *TCP) writeLoop(ctx context.Context, c net.Conn) error {
 func writeBuffersFull(c net.Conn, buffers net.Buffers, size int) error {
 	if _, ok := c.(*net.TCPConn); ok {
 		n, err := buffers.WriteTo(c)
-		if err != nil { return err }
-		if n != int64(size) { return io.ErrShortWrite }
+		if err != nil {
+			return err
+		}
+		if n != int64(size) {
+			return io.ErrShortWrite
+		}
 		return nil
 	}
 	// net.Pipe and injected test connections need the short-write fallback.
-	for _, b := range buffers { if err := writeFull(c, b); err != nil { return err } }
+	for _, b := range buffers {
+		if err := writeFull(c, b); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 func (t *TCP) proof(label string, nonce []byte) []byte {
@@ -361,12 +394,16 @@ func (t *TCP) Close() error {
 		t.startMu.Lock()
 		defer t.startMu.Unlock()
 		close(t.closeCh)
-		if t.cancel != nil { t.cancel() }
+		if t.cancel != nil {
+			t.cancel()
+		}
 		if t.ln != nil {
 			t.ln.Close()
 		}
 		t.mu.Lock()
-		for c := range t.connections { c.Close() }
+		for c := range t.connections {
+			c.Close()
+		}
 		if t.active != nil {
 			t.active.Close()
 		}

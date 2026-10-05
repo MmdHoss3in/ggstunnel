@@ -29,7 +29,7 @@ RUN = Path('/run/ggstunnel')
 WRAPPER = Path('/usr/local/bin/ggstunnel')
 SYSCTL_FILE = Path('/etc/sysctl.d/90-ggstunnel.conf')
 VERSION = (Path(__file__).resolve().parents[1]/'internal/version/VERSION').read_text().strip()
-PROFILES = ('bip', 'tcp', 'udp', 'icmp', 'gre')
+PROFILES = ('bip', 'tcp', 'udp', 'icmp', 'gre', 'ipip')
 
 def run(args, check=True, timeout=90):
     p = subprocess.run([str(x) for x in args], text=True, capture_output=True, timeout=timeout)
@@ -181,7 +181,7 @@ def conflict(c, old_name=None):
             listening = c['profile'] == 'udp' or (c['role'] == other['role'] == 'server')
             if c['profile'] in ('tcp', 'udp') and listening and listeners_overlap(c['real']['listen_addr'], other['real']['listen_addr']):
                 raise ValueError('Transport port already allocated')
-            if c['profile'] in ('bip','icmp','gre') and c['real']['peer_ip'] == other['real']['peer_ip']:
+            if c['profile'] in ('bip','icmp','gre','ipip') and c['real']['peer_ip'] == other['real']['peer_ip']:
                 raise ValueError('One raw tunnel per transport and public peer IP')
     binds = []
     for other in [*others.values(), c]:
@@ -227,7 +227,7 @@ def local_route(peer):
 def create_server():
     used = configs(); index = next((i for i in range(1,169) if f'ggs{i:02d}' not in used), None)
     if not index: raise ValueError('No free IDs')
-    print('Transports: tcp / udp / bip / icmp / gre. BIP5 performance candidate: both peers require this release.')
+    print('Transports: tcp / udp / bip / icmp / gre / ipip. Both peers must use compatible wire settings.')
     profile = ask('Transport', 'bip').lower()
     if profile not in PROFILES: raise ValueError('Unsupported transport')
     server = ipv4(ask('Iran public IPv4'))
@@ -236,10 +236,10 @@ def create_server():
     c = make_config(index, profile, server, peer, port, secrets.token_hex(32), 'server')
     save_config(c)
     print('Copy this SECRET join code to the foreign server (contains PSK):\n' + encode_join(c))
-    print('Allow inbound', f'{profile.upper()} {port}' if profile in ('tcp','udp') else ('IPv4 protocol 47' if profile=='gre' else 'ICMP'), 'from', peer, 'in your firewall.')
+    print('Allow inbound', f'{profile.upper()} {port}' if profile in ('tcp','udp') else ({'gre':'IPv4 protocol 47','ipip':'IPv4 protocol 4'}.get(profile,'ICMP')), 'from', peer, 'in your firewall.')
 
 def join_client():
-    token = getpass.getpass('Paste SECRET GGS2 join code (hidden): ').strip()
+    token = getpass.getpass('Paste SECRET GGS2/GGS3 join code (hidden): ').strip()
     c = decode_join(token)
     c['real']['local_ip'] = local_route(c['real']['peer_ip'])
     c['real']['listen_addr'] = f"{c['real']['local_ip']}:{c['transport']['l4_port']}"
@@ -626,6 +626,7 @@ def configure_wire(name):
     print('Experimental compact mode requires the same mode on both updated peers; switching one side interrupts traffic.')
     print('Legacy 1348 requires outer MTU 1500. No automatic PMTU discovery. Default 1280 is safer.')
     print('The legacy kernel echo filter is not applicable to compact mode; actual overhead must be measured.')
+    print('Compact currently fails the strict stateful-path speed gate. Keep legacy for production until corrected.')
     mode=ask('Wire mode: legacy / compact',c['transport'].get('bip_wire_mode') or 'legacy')
     if mode not in ('legacy','compact'):raise ValueError('Unknown wire mode')
     payload=integer(ask('Payload and TUN MTU','1280'),576,1348)
@@ -645,7 +646,7 @@ def optimize_existing():
         c['performance']['queue_size']=max(8192,c['performance'].get('queue_size') or 8192)
         c['tun']['tx_queue_len']=max(1024,c['tun'].get('tx_queue_len') or 1024)
         save_config(c,True)
-    print('BIP performance defaults applied; both peers must run BIP5.')
+    print('BIP performance defaults applied; both peers must use compatible wire settings.')
     print('Host socket ceilings are separate: option 16, then restart active tunnels. Existing larger buffers are preserved.')
 
 def run_logs(name):subprocess.run(['journalctl','-u',unit(name),'-n','100','--no-pager'])

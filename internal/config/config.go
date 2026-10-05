@@ -82,9 +82,9 @@ type TransportConfig struct {
 	ICMPType         int `json:"icmp_type"`
 	ICMPCode         int `json:"icmp_code"`
 
-	BIPDeadTimeoutSec int `json:"bip_dead_timeout_sec"`
-	BIPHandshakeTimeoutSec int `json:"bip_handshake_timeout_sec"`
-	BIPWireMode string `json:"bip_wire_mode,omitempty"`
+	BIPDeadTimeoutSec      int    `json:"bip_dead_timeout_sec"`
+	BIPHandshakeTimeoutSec int    `json:"bip_handshake_timeout_sec"`
+	BIPWireMode            string `json:"bip_wire_mode,omitempty"`
 }
 
 type PerformanceConfig struct {
@@ -268,7 +268,9 @@ func (c *Config) ApplyDefaults() {
 }
 
 func (c *Config) Validate() error {
-	if c.Profile != "bip" && c.Transport.BIPWireMode == "compact" {return errors.New("compact wire currently requires profile bip")}
+	if c.Profile != "bip" && c.Transport.BIPWireMode == "compact" {
+		return errors.New("compact wire currently requires profile bip")
+	}
 	if len(c.Forwards) > 128 {
 		return errors.New("at most 128 forward rules")
 	}
@@ -392,7 +394,9 @@ func (c *Config) Validate() error {
 		if c.Transport.BIPHandshakeTimeoutSec < 1 || c.Transport.BIPHandshakeTimeoutSec > 86400 {
 			return errors.New("transport.bip_handshake_timeout_sec must be 1..86400")
 		}
-		if c.Transport.BIPWireMode != "" && c.Transport.BIPWireMode != "legacy" && c.Transport.BIPWireMode != "compact" { return errors.New("transport.bip_wire_mode must be legacy or compact") }
+		if c.Transport.BIPWireMode != "" && c.Transport.BIPWireMode != "legacy" && c.Transport.BIPWireMode != "compact" {
+			return errors.New("transport.bip_wire_mode must be legacy or compact")
+		}
 
 		if c.Performance.MaxFramePayload > 1348 {
 			return errors.New("BIP5 max_frame_payload must be <= 1348 for a 1500-byte outer MTU")

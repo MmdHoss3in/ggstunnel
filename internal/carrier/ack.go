@@ -6,9 +6,13 @@ import "time"
 // control packet. Preserve the reply/request direction for stateful paths,
 // and keep dedicated ACKs when the receiver needs the wide SACK extension.
 func (b *BIP) coalesceAck(p wirePacket) {
-	if b.ackDue.IsZero() || p.kind >= bipKindHello || p.kind == bipKindAck || p.typ != b.ackType || p.target != b.active { return }
+	if b.ackDue.IsZero() || p.kind >= bipKindHello || p.kind == bipKindAck || p.typ != b.ackType || p.target != b.active {
+		return
+	}
 	ack, sack := b.takeAckForSend()
-	if p.ack != ack || p.sack & sack != sack { return }
+	if p.ack != ack || p.sack&sack != sack {
+		return
+	}
 	b.ackMu.Lock()
 	for seq := range b.rxAck.seen {
 		if sequenceDistance(ack, seq) > 64 {

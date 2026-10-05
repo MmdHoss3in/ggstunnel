@@ -50,6 +50,14 @@ func TestCompactReflectionAndKeyLifetime(t *testing.T){
 	if _,err:=a.prepareWire(8,1,1,bipKindHello,0,0,nil,0);!errors.Is(err,frame.ErrKeyLifetime){t.Fatal("counter reused")}
 }
 
+func TestCompactPeerReplyDoesNotDeriveAnOwnReflectionKey(t *testing.T){
+	a,b:=compactPair(t)
+	wire,err:=a.encode(wirePacket{typ:0,kind:bipKindHello,sender:a.localID,number:1,payload:[]byte{a.localRole()}});if err!=nil{t.Fatal(err)}
+	if b.compactReflection(wire){t.Fatal("peer reply treated as own echo")}
+	if b.compactSend!=nil || b.compactReceive!=nil{t.Fatal("reflection prefilter touched peer key state")}
+	if _,err:=b.decode(wire);err!=nil{t.Fatal(err)}
+}
+
 func TestCompactEncryptedFramePackingAndReplay(t *testing.T){
 	a,b:=compactPair(t);sender,_:=frame.NewCodec(a.cfg.PSK);receiver,_:=frame.NewCodec(a.cfg.PSK)
 	if err:=a.BindIdentity(sender.SessionID());err!=nil{t.Fatal(err)}

@@ -24,16 +24,26 @@ func Compact(b []byte, sender uint64) []byte {
 }
 
 func ExpandCompact(b []byte, sender uint64) ([]byte, error) {
-	if len(b) == 0 { return nil, ErrMalformed }
-	if b[0] == 0 { return append([]byte(nil), b[1:]...), nil }
-	if sender == 0 || len(b) < 13+NonceLen+16 || (b[0] != TypeData && b[0] != TypeHeartbeat) { return nil, ErrMalformed }
+	if len(b) == 0 {
+		return nil, ErrMalformed
+	}
+	if b[0] == 0 {
+		return append([]byte(nil), b[1:]...), nil
+	}
+	if sender == 0 || len(b) < 13+NonceLen+16 || (b[0] != TypeData && b[0] != TypeHeartbeat) {
+		return nil, ErrMalformed
+	}
 	seq := uint64(binary.BigEndian.Uint32(b[1:5]))
 	// The existing codec admits sequence 2^32 as its final frame.
-	if seq == 0 { seq = 1<<32 }
-	h := Header{Type:b[0],SessionID:sender,Seq:seq,PacketID:binary.BigEndian.Uint32(b[5:9]),FragIndex:binary.BigEndian.Uint16(b[9:11]),FragCount:binary.BigEndian.Uint16(b[11:13])}
+	if seq == 0 {
+		seq = 1 << 32
+	}
+	h := Header{Type: b[0], SessionID: sender, Seq: seq, PacketID: binary.BigEndian.Uint32(b[5:9]), FragIndex: binary.BigEndian.Uint16(b[9:11]), FragCount: binary.BigEndian.Uint16(b[11:13])}
 	out := make([]byte, HeaderLen+len(b)-13)
-	writeHeader(out[:HeaderLen],h)
-	if _,err := parseHeader(out); err != nil { return nil, ErrMalformed }
-	copy(out[HeaderLen:],b[13:])
-	return out,nil
+	writeHeader(out[:HeaderLen], h)
+	if _, err := parseHeader(out); err != nil {
+		return nil, ErrMalformed
+	}
+	copy(out[HeaderLen:], b[13:])
+	return out, nil
 }

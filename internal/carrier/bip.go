@@ -190,17 +190,17 @@ type BIP struct {
 	fastRetries atomic.Uint64
 	rxBuffered  atomic.Uint64
 
-	peerSilenceMS    atomic.Int64
-	rehandshakeTries atomic.Uint64
-	startedAt time.Time
-	handshakeWaitMS atomic.Int64
-	acksCoalesced atomic.Uint64
+	peerSilenceMS               atomic.Int64
+	rehandshakeTries            atomic.Uint64
+	startedAt                   time.Time
+	handshakeWaitMS             atomic.Int64
+	acksCoalesced               atomic.Uint64
 	compactSend, compactReceive *compactKeys
-	compactAliasMasks [3]uint64
-	compactAliasReady [3]bool
-	preparedWire wirePacket
-	dataBatchWire []wirePacket
-	compactTupleNo uint64
+	compactAliasMasks           [3]uint64
+	compactAliasReady           [3]bool
+	preparedWire                wirePacket
+	dataBatchWire               []wirePacket
+	compactTupleNo              uint64
 }
 
 func NewBIP(c *config.Config) (Carrier, error) {
@@ -260,7 +260,11 @@ func (b *BIP) Name() string         { return "bip" }
 func (b *BIP) Recv() <-chan []byte  { return b.rx }
 func (b *BIP) Errors() <-chan error { return b.errors }
 func (b *BIP) Send(p []byte) error {
-	select {case <-b.closed:return ErrClosed;default:}
+	select {
+	case <-b.closed:
+		return ErrClosed
+	default:
+	}
 	if len(p) == 0 || len(p) > b.cfg.Performance.MaxFramePayload+60 {
 		return errors.New("BIP frame too large")
 	}
@@ -299,7 +303,13 @@ func (b *BIP) SendContext(ctx context.Context, p []byte) error {
 func (b *BIP) Start(ctx context.Context) error {
 	b.startMu.Lock()
 	defer b.startMu.Unlock()
-	select {case <-b.closed:return ErrClosed;case <-ctx.Done():return ctx.Err();default:}
+	select {
+	case <-b.closed:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 	if b.started {
 		return errors.New("already started")
 	}
@@ -364,7 +374,13 @@ func (b *BIP) Start(ctx context.Context) error {
 func (b *BIP) StartPacketIO(ctx context.Context, backend PacketIO) error {
 	b.startMu.Lock()
 	defer b.startMu.Unlock()
-	select {case <-b.closed:return ErrClosed;case <-ctx.Done():return ctx.Err();default:}
+	select {
+	case <-b.closed:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 	if b.started || backend == nil {
 		return errors.New("invalid packet backend")
 	}
@@ -500,7 +516,9 @@ func previousSequence(s uint32) uint32 {
 }
 func seqAfter(a, c uint32) bool { return int32(a-c) > 0 }
 func (b *BIP) nextTuple() (uint16, uint16) {
-	if b.compactMode() { return b.nextCompactTuple() }
+	if b.compactMode() {
+		return b.nextCompactTuple()
+	}
 	b.icmpSeq++
 	if b.icmpSeq == 0 {
 		b.id++
@@ -859,7 +877,10 @@ func (b *BIP) issueChallenge(p wirePacket, now time.Time) {
 	}
 }
 func (b *BIP) handle(body []byte, now time.Time) {
-	if b.compactMode() && b.compactReflection(body) { b.reflectionsSuppressed.Add(1); return }
+	if b.compactMode() && b.compactReflection(body) {
+		b.reflectionsSuppressed.Add(1)
+		return
+	}
 	// Kernel echo changes type/checksum but leaves the authenticated payload.
 	// Recognize only a verified reflection of our own request; never ACK it.
 	if !b.compactMode() && len(body) >= 72 && len(body) <= 1480 && body[0] == 0 && string(body[8:12]) == bipMagic && checksum(body) == 0 && binary.BigEndian.Uint64(body[16:24]) == b.localID {
@@ -1403,7 +1424,10 @@ func (b *BIP) prepareWire(typ byte, id, tuple uint16, kind, flags byte, token ui
 		return nil, errors.New("carrier not started")
 	}
 	b.packetNo++
-	if b.compactMode() && b.packetNo > 0xffffffff { b.fail(frame.ErrKeyLifetime); return nil, frame.ErrKeyLifetime }
+	if b.compactMode() && b.packetNo > 0xffffffff {
+		b.fail(frame.ErrKeyLifetime)
+		return nil, frame.ErrKeyLifetime
+	}
 	if b.packetNo == 0 {
 		return nil, errors.New("packet counter exhausted")
 	}
@@ -1416,18 +1440,22 @@ func (b *BIP) prepareWire(typ byte, id, tuple uint16, kind, flags byte, token ui
 	b.preparedWire.payload = nil
 	var ip []byte
 	if b.compactMode() {
-		body,err:=b.encodeCompact(p);if err!=nil{return nil,err}
-		ip=make([]byte,20+len(body));copy(ip[20:],body)
+		body, err := b.encodeCompact(p)
+		if err != nil {
+			return nil, err
+		}
+		ip = make([]byte, 20+len(body))
+		copy(ip[20:], body)
 	} else {
-	if 20+72+len(payload) > 1500 {
-		return nil, syscall.EMSGSIZE
-	}
-	// Encode directly after the IPv4 header: no second full DATA allocation
-	// and copy before the synchronous packet backend consumes the buffer.
-	ip = make([]byte, 20+72+len(payload))
-	if err := b.writeBody(p, ip[20:]); err != nil {
-		return nil, err
-	}
+		if 20+72+len(payload) > 1500 {
+			return nil, syscall.EMSGSIZE
+		}
+		// Encode directly after the IPv4 header: no second full DATA allocation
+		// and copy before the synchronous packet backend consumes the buffer.
+		ip = make([]byte, 20+72+len(payload))
+		if err := b.writeBody(p, ip[20:]); err != nil {
+			return nil, err
+		}
 	}
 	ip[0] = 0x45
 	binary.BigEndian.PutUint16(ip[2:4], uint16(len(ip)))
@@ -1442,8 +1470,10 @@ func (b *BIP) prepareWire(typ byte, id, tuple uint16, kind, flags byte, token ui
 func (b *BIP) recordWireResult(ip []byte, success bool, metadata ...wirePacket) {
 	body := ip[20:]
 	var p wirePacket
-	if len(metadata)>0 {p=metadata[0]} else {
-		p=wirePacket{typ:body[0],kind:body[12],token:binary.BigEndian.Uint32(body[40:44]),target:binary.BigEndian.Uint64(body[24:32]),ack:binary.BigEndian.Uint32(body[44:48]),sack:binary.BigEndian.Uint64(body[48:56])}
+	if len(metadata) > 0 {
+		p = metadata[0]
+	} else {
+		p = wirePacket{typ: body[0], kind: body[12], token: binary.BigEndian.Uint32(body[40:44]), target: binary.BigEndian.Uint64(body[24:32]), ack: binary.BigEndian.Uint32(body[44:48]), sack: binary.BigEndian.Uint64(body[48:56])}
 	}
 	if b.trace != nil {
 		b.traceRecord(traceEvent{At: time.Now(), Event: "wire_tx", Seq: p.token, Ack: p.ack, Sack: p.sack, Kind: p.kind, Type: p.typ, Error: !success})
@@ -1467,7 +1497,9 @@ func (b *BIP) macKey(kind byte) []byte {
 	return b.sessionKey
 }
 func (b *BIP) encode(p wirePacket) ([]byte, error) {
-	if b.compactMode() { return b.encodeCompact(p) }
+	if b.compactMode() {
+		return b.encodeCompact(p)
+	}
 	body := make([]byte, 72+len(p.payload))
 	if err := b.writeBody(p, body); err != nil {
 		return nil, err
@@ -1507,7 +1539,9 @@ func packetMAC(key, body []byte) [16]byte {
 	return tag
 }
 func (b *BIP) decode(body []byte) (wirePacket, error) {
-	if b.compactMode() { return b.decodeCompact(body) }
+	if b.compactMode() {
+		return b.decodeCompact(body)
+	}
 	var p wirePacket
 	if len(body) < 72 || len(body) > 1480 || string(body[8:12]) != bipMagic || (body[0] != 0 && body[0] != 8) || body[1] != 0 || body[14] != 0 || body[15] != 0 || checksum(body) != 0 {
 		return p, errors.New("malformed BIP5")
@@ -1573,7 +1607,7 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 		RehandshakeTries:      b.rehandshakeTries.Load(),
 		HandshakeWaitMS:       b.handshakeWaitMS.Load(),
 		ACKsCoalesced:         b.acksCoalesced.Load(),
-		WireMode:             b.cfg.Transport.BIPWireMode,
+		WireMode:              b.cfg.Transport.BIPWireMode,
 		PathSuspended:         b.pathSuspended.Load(),
 		FastRetransmits:       b.fastRetries.Load(),
 		ReorderBuffered:       b.rxBuffered.Load(),

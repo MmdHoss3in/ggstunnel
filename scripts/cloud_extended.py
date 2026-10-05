@@ -23,6 +23,15 @@ BIN = SOURCE / 'dist' / ('ggstunnel-linux-' + ARCH)
 OUT = ROOT / 'extended-results'
 
 
+def whole_transfer_receiver_bytes(receiving):
+    # iperf -O may reset counters between retained interval boundaries.
+    if receiving['start']['test_start'].get('omit',0):return None
+    total=sum(i['sum']['bytes'] for i in receiving['intervals'])
+    if total!=receiving['end']['sum_received']['bytes']:
+        raise RuntimeError('Receiver interval bytes do not match whole-transfer accounting')
+    return total
+
+
 def run(*args, check=True, timeout=30):
     p = subprocess.run(list(map(str, args)), capture_output=True, text=True, timeout=timeout)
     if check and p.returncode:
@@ -194,10 +203,14 @@ class Pair:
         if hasattr(server, 'report_path'):
             receiver=json.loads(server.report_path.read_text())
             measured['receiver_intervals_mbps']=[i['sum']['bits_per_second']/1e6 for i in receiver['intervals'] if not i['sum'].get('omitted',False)]
-            # NIC counters include warmup. Read application interval bytes
-            # from the receiving endpoint using the same accounting scope.
+            # iperf -O resets counters during warmup and can lose bytes between
+            # retained intervals. Summing those intervals is not whole-transfer
+            # accounting. Only zero-omit runs permit a NIC/application ratio.
             receiving = data if data['start']['test_start'].get('reverse') else receiver
-            measured['application_received_bytes_all_intervals'] = sum(i['sum']['bytes'] for i in receiving['intervals'])
+            measured['application_received_bytes_retained_intervals'] = sum(i['sum']['bytes'] for i in receiving['intervals'])
+            app_bytes=whole_transfer_receiver_bytes(receiving)
+            if app_bytes is not None:
+                measured['application_received_bytes_all_intervals']=app_bytes
         return measured
 
     def probe_server(self):

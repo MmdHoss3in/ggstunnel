@@ -11,22 +11,22 @@ import (
 )
 
 func TestBIPRawLoopback(t *testing.T) {
-	testBIPRawLoopback(t,"")
+	testBIPRawLoopback(t, "")
 }
 
 func TestBIPCompactRawLoopback(t *testing.T) {
-	testBIPRawLoopback(t,"compact")
+	testBIPRawLoopback(t, "compact")
 }
 
-func testBIPRawLoopback(t *testing.T,mode string) {
+func testBIPRawLoopback(t *testing.T, mode string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ca := simConfig("server")
-	ca.Transport.BIPWireMode=mode
+	ca.Transport.BIPWireMode = mode
 	ca.Real.LocalIP = "127.0.0.1"
 	ca.Real.PeerIP = "127.0.0.2"
 	cb := simConfig("client")
-	cb.Transport.BIPWireMode=mode
+	cb.Transport.BIPWireMode = mode
 	cb.Real.LocalIP = "127.0.0.2"
 	cb.Real.PeerIP = "127.0.0.1"
 	ai, err := NewBIP(ca)

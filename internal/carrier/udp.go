@@ -20,9 +20,9 @@ type UDP struct {
 	closeOnce sync.Once
 	closeCh   chan struct{}
 	errors    chan error
-	startMu sync.Mutex
-	started bool
-	workers sync.WaitGroup
+	startMu   sync.Mutex
+	started   bool
+	workers   sync.WaitGroup
 }
 
 func NewUDP(c *config.Config) *UDP {
@@ -35,8 +35,16 @@ func (u *UDP) Send(b []byte) error  { return enqueueOpen(u.closeCh, u.tx, b) }
 func (u *UDP) Start(ctx context.Context) error {
 	u.startMu.Lock()
 	defer u.startMu.Unlock()
-	if u.started { return errors.New("UDP carrier already started") }
-	select { case <-u.closeCh: return ErrClosed; case <-ctx.Done(): return ctx.Err(); default: }
+	if u.started {
+		return errors.New("UDP carrier already started")
+	}
+	select {
+	case <-u.closeCh:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 	p, err := net.ResolveUDPAddr("udp4", u.cfg.Real.PeerAddr)
 	if err != nil {
 		return err
@@ -52,8 +60,14 @@ func (u *UDP) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := c.SetReadBuffer(u.cfg.Transport.SockBuf); err != nil { c.Close(); return err }
-	if err := c.SetWriteBuffer(u.cfg.Transport.SockBuf); err != nil { c.Close(); return err }
+	if err := c.SetReadBuffer(u.cfg.Transport.SockBuf); err != nil {
+		c.Close()
+		return err
+	}
+	if err := c.SetWriteBuffer(u.cfg.Transport.SockBuf); err != nil {
+		c.Close()
+		return err
+	}
 	u.conn, u.peer, u.started = c, p, true
 	u.workers.Add(2)
 	go func() { defer u.workers.Done(); u.readLoop(ctx) }()

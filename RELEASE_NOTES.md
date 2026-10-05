@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased transport work
+
+The `feature/compact-wire` branch adds bounded initial BIP authentication, correct carrier shutdown, queued TCP writev and native UDP/raw mmsg batching, successful-send ACK coalescing, an explicit encrypted compact BIP format and manager option 22/GGS3. IPIP is available in the manager. Legacy remains the default. See [transport-improvements.md](docs/transport-improvements.md) for exact-source observations and protocol details.
+
+Compact currently fails the stricter stateful-path throughput gate. Its new kernel echo filter is not implemented or authorized yet. Clean-path speed measurements do not make it ready for stable deployment. No new release or 15% application-overhead guarantee is implied.
+
 ## v0.3.1 — directional PULL feedback, native batching and negotiated packet packing
 
 This Stable update reduces unanswered PULL polling, redundant kernel echoes and small-frame packet overhead, and repairs directional retries and recovery rate reporting. It includes rc1 authenticated rehandshake and bounded hard recovery. Publication requires the complete exact-tagged-source cloud gates; short synthetic tests do not certify multi-day Iran/foreign WAN reliability.

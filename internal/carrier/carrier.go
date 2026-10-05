@@ -42,9 +42,9 @@ type RuntimeStats struct {
 	PeerAuthenticated bool   `json:"peer_authenticated"`
 	PeerSilenceMS     int64  `json:"peer_silence_ms"`
 	RehandshakeTries  uint64 `json:"rehandshake_attempts"`
-	HandshakeWaitMS int64 `json:"handshake_wait_ms"`
-	ACKsCoalesced uint64 `json:"acks_coalesced"`
-	WireMode string `json:"wire_mode,omitempty"`
+	HandshakeWaitMS   int64  `json:"handshake_wait_ms"`
+	ACKsCoalesced     uint64 `json:"acks_coalesced"`
+	WireMode          string `json:"wire_mode,omitempty"`
 
 	FastDataTx      uint64 `json:"fast_data_tx"`
 	PullDataTx      uint64 `json:"pull_data_tx"`
@@ -115,12 +115,19 @@ func enqueue(ch chan []byte, b []byte) error {
 }
 
 func enqueueOpen(closed <-chan struct{}, ch chan []byte, b []byte) error {
-	select { case <-closed: return ErrClosed; default: }
+	select {
+	case <-closed:
+		return ErrClosed
+	default:
+	}
 	cp := append([]byte(nil), b...)
 	select {
-	case <-closed: return ErrClosed
-	case ch <- cp: return nil
-	default: return ErrQueueFull
+	case <-closed:
+		return ErrClosed
+	case ch <- cp:
+		return nil
+	default:
+		return ErrQueueFull
 	}
 }
 

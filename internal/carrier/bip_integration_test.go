@@ -41,7 +41,9 @@ func (l *simLink) emit(from int, w []byte) error {
 	defer l.mu.Unlock()
 	body := append([]byte(nil), w[20:]...)
 	kind := body[12]
-	if l.ends[from] != nil && l.ends[from].compactMode() { kind = l.ends[from].preparedWire.kind }
+	if l.ends[from] != nil && l.ends[from].compactMode() {
+		kind = l.ends[from].preparedWire.kind
+	}
 	id, seq := binary.BigEndian.Uint16(body[4:6]), binary.BigEndian.Uint16(body[6:8])
 	if body[0] == 8 {
 		l.requests[[3]uint16{uint16(from), id, seq}] = time.Now()

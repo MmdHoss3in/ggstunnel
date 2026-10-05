@@ -7,6 +7,12 @@ class CompactManagerTests(unittest.TestCase):
  setUp=ManagerTests.setUp
  config=ManagerTests.config
  fake_run=ManagerTests.fake_run
+ def test_ipip_join_and_same_peer_conflict(self):
+  c=self.config(profile='ipip');peer=m.decode_join(m.encode_join(c))
+  self.assertEqual(peer['profile'],'ipip');m.validate(c,EXE);m.validate(peer,EXE)
+  m.atomic(m.confpath('ggs01'),json.dumps(c))
+  other=self.config(2,'ipip');other['real']['peer_ip']=c['real']['peer_ip']
+  with self.assertRaisesRegex(ValueError,'One raw tunnel'):m.conflict(other)
  def test_compact_join_preserves_mode_and_payload(self):
   c=self.config(profile='bip');c['transport']['bip_wire_mode']='compact'
   c['tun']['mtu']=1348;c['performance']['max_frame_payload']=1348

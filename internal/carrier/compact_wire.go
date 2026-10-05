@@ -182,6 +182,8 @@ func bodyType(body []byte)byte {if len(body)>0{return body[0]};return 0}
 
 func (b *BIP) compactReflection(body []byte) bool {
 	if len(body)<compactMinimum || body[0]!=0{return false}
+	mask,err:=b.aliasMask(b.localRole())
+	if err!=nil || binary.BigEndian.Uint64(body[8:16])!=b.localID^mask {return false}
 	p,err:=b.openCompact(body,b.localRole(),8)
 	return err==nil && p.sender==b.localID
 }
