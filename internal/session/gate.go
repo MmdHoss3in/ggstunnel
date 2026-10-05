@@ -44,12 +44,35 @@ func NewGate(key []byte, localID uint64, wire uint16) (*Gate, error) {
 func (g *Gate) Issue(peerID uint64, role byte, now time.Time) (Challenge, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	return g.issue(peerID, role, now, false)
+}
+
+// IssueReusable retries the same live challenge without extending its lifetime.
+// A peer's repeated HELLO must not exhaust the pending budget while a reply is
+// lost. Accept still consumes the nonce, and retired identities remain rejected.
+func (g *Gate) IssueReusable(peerID uint64, role byte, now time.Time) (Challenge, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.issue(peerID, role, now, true)
+}
+
+func (g *Gate) issue(peerID uint64, role byte, now time.Time, reuse bool) (Challenge, error) {
 	for n, p := range g.pending {
 		if !now.Before(p.expires) {
 			delete(g.pending, n)
 		}
 	}
-	if peerID == 0 || peerID == g.localID || (role != 1 && role != 2) || g.retired[peerID] || len(g.pending) >= 16 {
+	if peerID == 0 || peerID == g.localID || (role != 1 && role != 2) || g.retired[peerID] {
+		return Challenge{}, errors.New("challenge rejected")
+	}
+	if reuse {
+		for _, p := range g.pending {
+			if p.challenge.PeerID == peerID && p.challenge.Role == role {
+				return p.challenge, nil
+			}
+		}
+	}
+	if len(g.pending) >= 16 {
 		return Challenge{}, errors.New("challenge rejected")
 	}
 	c := Challenge{PeerID: peerID, LocalID: g.localID, Wire: g.wire, Role: role}

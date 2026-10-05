@@ -2,9 +2,12 @@ package carrier
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"ggstunnel/internal/config"
@@ -35,20 +38,41 @@ func installBIPReflectionFilter(local, peer, instance string, run func([]string)
 // systemd's best-effort ExecStopPost also runs after an abnormal exit. Reuse
 // the exact rule specification; never flush chains or remove unrelated rules.
 func CleanupBIPReflectionFilter(c *config.Config) error {
+	// The config may have been replaced before systemd stops the old process.
+	// Stored records retain its exact pair; only this instance/netns is cleaned.
+	namespace, nsErr := os.Readlink("/proc/self/ns/net")
+	var compactErr error
+	if nsErr == nil {
+		compactErr = cleanupCompactEchoRecords(compactEchoDirectory, c.TUN.Name, namespace, runEchoRule)
+	} else {
+		compactErr = nsErr
+	}
 	if c.Profile != "bip" {
-		return nil
+		return compactErr
 	}
-	if err := runEchoRule(bipEchoRule(c.Real.LocalIP, c.Real.PeerIP, c.TUN.Name, "-C")); err != nil {
-		return nil
+	err := runEchoRule(bipEchoRule(c.Real.LocalIP, c.Real.PeerIP, c.TUN.Name, "-C"))
+	if err == nil {
+		err = runEchoRule(bipEchoRule(c.Real.LocalIP, c.Real.PeerIP, c.TUN.Name, "-D"))
 	}
-	return runEchoRule(bipEchoRule(c.Real.LocalIP, c.Real.PeerIP, c.TUN.Name, "-D"))
+	if errors.Is(err, errEchoRuleMissing) {
+		err = nil
+	}
+	return errors.Join(compactErr, err)
 }
+
+var errEchoRuleMissing = errors.New("echo filter rule absent")
 
 func runEchoRule(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "iptables", args...).CombinedOutput()
+	command := exec.CommandContext(ctx, "iptables", args...)
+	command.Env = append(os.Environ(), "LC_ALL=C")
+	output, err := command.CombinedOutput()
 	if err != nil {
+		var exit *exec.ExitError
+		if len(args) > 2 && args[2] == "-C" && errors.As(err, &exit) && exit.ExitCode() == 1 && strings.Contains(string(output), "does a matching rule exist") {
+			return errEchoRuleMissing
+		}
 		return fmt.Errorf("iptables: %w: %s", err, output)
 	}
 	return nil

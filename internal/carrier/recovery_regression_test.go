@@ -57,6 +57,42 @@ func TestOneCongestionCutPerTransmittedFlight(t *testing.T) {
 	}
 }
 
+func TestOldCarrierTimeoutDoesNotCutCurrentPath(t *testing.T) {
+	b := testBIP(t)
+	b.tuner = adaptiveTuner()
+	b.tuner.pathChangedTo(pendingModeFast)
+	b.tuningPath = pendingModeFast
+	b.tuner.cwnd = 256
+	b.dataSeq = 300
+	now := time.Now()
+	b.noteDeliveryLoss(&pendingData{item: outData{seq: 100}, mode: pendingModeRequest}, now)
+	if b.tuner.cuts != 0 || b.tuner.window() != 256 {
+		t.Fatal("old blocked request penalized the working FAST path")
+	}
+	b.noteDeliveryLoss(&pendingData{item: outData{seq: 200}, mode: pendingModeFast}, now)
+	if b.tuner.cuts != 1 || b.tuner.window() != 128 {
+		t.Fatal("current path lost congestion protection")
+	}
+}
+
+func TestOldCarrierACKDeliversWithoutUpdatingCurrentRTT(t *testing.T) {
+	b := testBIP(t)
+	b.tuner = adaptiveTuner()
+	b.tuner.pathChangedTo(pendingModeFast)
+	b.tuningPath = pendingModeFast
+	now := time.Now()
+	b.queuePending(outData{seq: 1}, pendingModeRequest, now.Add(-80*time.Millisecond))
+	b.processPeerAckAt(1, 0, now)
+	if len(b.pending) != 0 || b.tuner.window() != 16 || b.tuner.samples != 0 {
+		t.Fatal("old carrier ACK was dropped or contaminated new path feedback")
+	}
+	b.queuePending(outData{seq: 2}, pendingModeFast, now.Add(-80*time.Millisecond))
+	b.processPeerAckAt(2, 0, now)
+	if len(b.pending) != 0 || b.tuner.window() != 17 || b.tuner.samples != 1 {
+		t.Fatal("current carrier ACK did not grow the bounded window")
+	}
+}
+
 func TestPathTransitionPreservesSlowStartAndLossThreshold(t *testing.T) {
 	x := adaptiveTuner()
 	threshold := x.threshold
@@ -69,7 +105,10 @@ func TestPathTransitionPreservesSlowStartAndLossThreshold(t *testing.T) {
 	if x.window() != 32 {
 		t.Fatal("initial growth was throttled")
 	}
-	x.onTimeout(now)
+	// Establish capacity beyond the setup-ping/startup allowance before
+	// requiring an authenticated path change to preserve a loss threshold.
+	x.onAck(48, 80*time.Millisecond, now.Add(time.Second))
+	x.onTimeout(now.Add(2 * time.Second))
 	window, threshold := x.window(), x.threshold
 	x.pathChanged()
 	if x.window() != window || x.threshold != threshold {

@@ -77,7 +77,7 @@ class RC5ManagerTests(unittest.TestCase):
    m.tune();file.write_text('# externally changed\n');values['net.core.rmem_max']='33554432';m.tune(True)
    self.assertEqual(file.read_text(),'# externally changed\n');self.assertEqual(values['net.core.rmem_max'],'33554432')
  def test_raw_transports_do_not_request_unused_port(self):
-  for profile in ('bip','icmp','gre','tcp','udp'):
+  for profile in ('bip','icmp','gre','ipip','tcp','udp'):
    values=[profile,'198.51.100.10','203.0.113.20']+(['25001'] if profile in ('tcp','udp') else [])
    with patch.object(m,'configs',return_value={}),patch.object(m,'ask',side_effect=values) as ask,patch.object(m,'save_config') as save,contextlib.redirect_stdout(io.StringIO()):
     m.create_server()
@@ -120,8 +120,8 @@ class RC5ManagerTests(unittest.TestCase):
  def test_every_menu_option_dispatches(self):
   route={'1':'create_server','2':'join_client','3':'status','9':'edit','10':'delete','11':'encode_join',
          '12':'run_logs','13':'diagnose','14':'capacity','15':'capacity','16':'tune','17':'tune',
-         '18':'install','19':'rollback','20':'capacity','21':'optimize_existing'}
-  for choice in map(str,range(1,22)):
+         '18':'install','19':'rollback','20':'capacity','21':'optimize_existing','22':'configure_wire'}
+  for choice in map(str,range(1,23)):
    with self.subTest(choice=choice),contextlib.ExitStack() as stack:
     stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
     stack.enter_context(patch.object(m,'locked',contextlib.nullcontext))

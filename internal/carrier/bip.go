@@ -60,6 +60,8 @@ var ErrBIPDeliveryTimeout = errors.New("BIP delivery timeout")
 // Recovery requires a fresh codec identity as well as a new carrier.
 var ErrBIPPeerUnresponsive = errors.New("BIP peer unresponsive")
 
+var ErrBIPHandshakeTimeout = errors.New("BIP authenticated handshake timeout")
+
 type outData struct {
 	flags   byte
 	data    []byte
@@ -158,6 +160,7 @@ type BIP struct {
 	collectDATA                                                                                      bool
 	dataBatch                                                                                        [][]byte
 	echoFilterCleanup                                                                                func()
+	compactEchoFilter                                                                                *compactEchoFilter
 	kernelEchoFilter                                                                                 atomic.Bool
 	cancel                                                                                           context.CancelFunc
 	workers                                                                                          sync.WaitGroup
@@ -188,8 +191,17 @@ type BIP struct {
 	fastRetries atomic.Uint64
 	rxBuffered  atomic.Uint64
 
-	peerSilenceMS    atomic.Int64
-	rehandshakeTries atomic.Uint64
+	peerSilenceMS               atomic.Int64
+	rehandshakeTries            atomic.Uint64
+	startedAt                   time.Time
+	handshakeWaitMS             atomic.Int64
+	acksCoalesced               atomic.Uint64
+	compactSend, compactReceive *compactKeys
+	compactAliasMasks           [3]uint64
+	compactAliasReady           [3]bool
+	preparedWire                wirePacket
+	dataBatchWire               []wirePacket
+	compactTupleNo              uint64
 }
 
 func NewBIP(c *config.Config) (Carrier, error) {
@@ -215,7 +227,7 @@ func NewBIP(c *config.Config) (Carrier, error) {
 	if err != nil {
 		return nil, err
 	}
-	g, err := session.NewGate(master, sid, 5)
+	g, err := session.NewGate(master, sid, wireVersion(c))
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +248,7 @@ func (b *BIP) BindIdentity(id uint64) error {
 	if b.started || id == 0 {
 		return errors.New("cannot bind identity")
 	}
-	g, err := session.NewGate(b.master, id, 5)
+	g, err := session.NewGate(b.master, id, wireVersion(b.cfg))
 	if err != nil {
 		return err
 	}
@@ -249,6 +261,11 @@ func (b *BIP) Name() string         { return "bip" }
 func (b *BIP) Recv() <-chan []byte  { return b.rx }
 func (b *BIP) Errors() <-chan error { return b.errors }
 func (b *BIP) Send(p []byte) error {
+	select {
+	case <-b.closed:
+		return ErrClosed
+	default:
+	}
 	if len(p) == 0 || len(p) > b.cfg.Performance.MaxFramePayload+60 {
 		return errors.New("BIP frame too large")
 	}
@@ -287,6 +304,13 @@ func (b *BIP) SendContext(ctx context.Context, p []byte) error {
 func (b *BIP) Start(ctx context.Context) error {
 	b.startMu.Lock()
 	defer b.startMu.Unlock()
+	select {
+	case <-b.closed:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 	if b.started {
 		return errors.New("already started")
 	}
@@ -327,7 +351,17 @@ func (b *BIP) Start(ctx context.Context) error {
 	log.Printf("BIP socket buffers requested=%d receive_kernel=%d send_kernel=%d (Linux values include doubled accounting)", b.cfg.Transport.SockBuf, b.socketReceiveBytes.Load(), b.socketSendBytes.Load())
 	b.recv = r
 	b.rawfd = fd
-	if cleanup, err := installBIPReflectionFilter(b.local.String(), b.peer.String(), b.cfg.TUN.Name, runEchoRule); err != nil {
+	if b.compactMode() {
+		if os.Getenv("GGS_BIP_COMPACT_ECHO_FILTER") != "0" {
+			namespace, err := os.Readlink("/proc/self/ns/net")
+			if err == nil {
+				b.compactEchoFilter, err = newCompactEchoFilter(compactEchoDirectory, b.local.String(), b.peer.String(), b.cfg.TUN.Name, namespace, runEchoRule)
+			}
+			if err != nil {
+				log.Printf("BIP compact echo filter unavailable: %v", err)
+			}
+		}
+	} else if cleanup, err := installBIPReflectionFilter(b.local.String(), b.peer.String(), b.cfg.TUN.Name, runEchoRule); err != nil {
 		log.Printf("BIP redundant kernel echo filter unavailable: %v", err)
 	} else {
 		b.echoFilterCleanup = cleanup
@@ -349,6 +383,13 @@ func (b *BIP) Start(ctx context.Context) error {
 func (b *BIP) StartPacketIO(ctx context.Context, backend PacketIO) error {
 	b.startMu.Lock()
 	defer b.startMu.Unlock()
+	select {
+	case <-b.closed:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 	if b.started || backend == nil {
 		return errors.New("invalid packet backend")
 	}
@@ -386,6 +427,7 @@ func (b *BIP) startActor(ctx context.Context) context.Context {
 	}
 	ctx, b.cancel = context.WithCancel(ctx)
 	b.started = true
+	b.startedAt = time.Now()
 	b.workers.Add(1)
 	go func() { defer b.workers.Done(); b.run(ctx) }()
 	return ctx
@@ -416,7 +458,7 @@ func (b *BIP) readLoopScalar(ctx context.Context) {
 			b.fail(err)
 			return
 		}
-		if n < 72 || n > 1480 || !src.IP.Equal(b.peer) || string(buf[8:12]) != bipMagic {
+		if !src.IP.Equal(b.peer) || !b.acceptsWireBody(buf[:n]) {
 			continue
 		}
 		p := append([]byte(nil), buf[:n]...)
@@ -431,6 +473,8 @@ func (b *BIP) readLoopScalar(ctx context.Context) {
 }
 func (b *BIP) Close() error {
 	b.closeOnce.Do(func() {
+		b.startMu.Lock()
+		defer b.startMu.Unlock()
 		if b.closed != nil {
 			close(b.closed)
 		}
@@ -446,6 +490,11 @@ func (b *BIP) Close() error {
 		b.workers.Wait()
 		if b.echoFilterCleanup != nil {
 			b.echoFilterCleanup()
+		}
+		if b.compactEchoFilter != nil {
+			if err := b.compactEchoFilter.close(); err != nil {
+				log.Printf("BIP compact echo filter cleanup: %v", err)
+			}
 		}
 		b.kernelEchoFilter.Store(false)
 		// The raw sender is nonblocking. Keep its descriptor valid until the
@@ -481,6 +530,9 @@ func previousSequence(s uint32) uint32 {
 }
 func seqAfter(a, c uint32) bool { return int32(a-c) > 0 }
 func (b *BIP) nextTuple() (uint16, uint16) {
+	if b.compactMode() {
+		return b.nextCompactTuple()
+	}
 	b.icmpSeq++
 	if b.icmpSeq == 0 {
 		b.id++
@@ -583,7 +635,7 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 		fast = fast || p.mode == pendingModeFast
 		if b.tuner != nil {
 			b.tuner.acked++
-			if p.item.retries == 0 && !p.sent.IsZero() {
+			if p.item.retries == 0 && !p.sent.IsZero() && (b.tuningPath == 0 || p.mode == b.tuningPath) {
 				clean++
 				if oldest.IsZero() || p.sent.Before(oldest) {
 					oldest = p.sent
@@ -833,15 +885,46 @@ func (b *BIP) sendResponse(p wirePacket, kind, flags byte, token uint32, payload
 }
 
 func (b *BIP) issueChallenge(p wirePacket, now time.Time) {
-	c, err := b.gate.Issue(p.sender, b.remoteRole(), now)
+	c, err := b.gate.IssueReusable(p.sender, b.remoteRole(), now)
 	if err == nil {
+		// decode already authenticated this HELLO/CHALLENGE with the PSK.
+		// Once active, only a fresh accepted proof may rotate the rule.
+		if b.active == 0 {
+			b.updateCompactEchoFilter(p.sender, now)
+		}
 		_ = b.sendResponse(p, bipKindChallenge, 0, 0, marshalChallenge(c), p.sender)
 	}
 }
+
+func (b *BIP) updateCompactEchoFilter(peer uint64, now time.Time) {
+	if b.compactEchoFilter == nil || peer == 0 {
+		return
+	}
+	remote, err := b.aliasMask(b.remoteRole())
+	if err != nil {
+		return
+	}
+	local, err := b.aliasMask(b.localRole())
+	if err != nil {
+		return
+	}
+	installed, err := b.compactEchoFilter.update(peer^remote, b.localID^local, now)
+	previous := b.kernelEchoFilter.Swap(installed)
+	if err != nil {
+		log.Printf("BIP compact echo filter unavailable: %v", err)
+	}
+	if installed && !previous {
+		log.Printf("BIP compact redundant kernel echo filter enabled for authenticated outer peer")
+	}
+}
 func (b *BIP) handle(body []byte, now time.Time) {
+	if b.compactMode() && b.compactReflection(body) {
+		b.reflectionsSuppressed.Add(1)
+		return
+	}
 	// Kernel echo changes type/checksum but leaves the authenticated payload.
 	// Recognize only a verified reflection of our own request; never ACK it.
-	if len(body) >= 72 && len(body) <= 1480 && body[0] == 0 && string(body[8:12]) == bipMagic && checksum(body) == 0 && binary.BigEndian.Uint64(body[16:24]) == b.localID {
+	if !b.compactMode() && len(body) >= 72 && len(body) <= 1480 && body[0] == 0 && string(body[8:12]) == bipMagic && checksum(body) == 0 && binary.BigEndian.Uint64(body[16:24]) == b.localID {
 		key := b.macKey(body[12])
 		if len(key) > 0 {
 			tag := b.wireMAC(body, 8)
@@ -878,7 +961,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 			}
 		case bipKindChallenge:
 			c, err := parseChallenge(p.payload)
-			if err != nil || c.PeerID != b.localID || c.LocalID != p.sender || c.Wire != 5 || c.Role != b.localRole() {
+			if err != nil || c.PeerID != b.localID || c.LocalID != p.sender || c.Wire != wireVersion(b.cfg) || c.Role != b.localRole() {
 				return
 			}
 			proof := session.Proof(b.master, c)
@@ -911,6 +994,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 				b.fail(err)
 				return
 			}
+			b.updateCompactEchoFilter(p.sender, now)
 			b.observePeerActivity(now)
 			// Capability is accepted only with a fresh receiver-issued challenge
 			// and a verified proof. Legacy peers ignore this flag and advertise 0.
@@ -1144,6 +1228,9 @@ func (b *BIP) run(ctx context.Context) {
 			if b.active == 0 {
 				continue
 			}
+			if !b.kernelEchoFilter.Load() {
+				b.updateCompactEchoFilter(b.active, now)
+			}
 			if b.allowPacking && !b.packetPacking.Load() && now.Sub(b.lastPackOffer) >= time.Second {
 				id, tuple := b.nextTuple()
 				_ = b.send(8, id, tuple, bipKindReady, 0, 0, b.packOfferPayload(), b.active)
@@ -1227,8 +1314,8 @@ func (b *BIP) run(ctx context.Context) {
 			} else if !b.needPullSince.IsZero() || remotePull {
 				path = 2
 			}
-			if path != 0 && b.tuningPath != 0 && path != b.tuningPath && b.tuner != nil {
-				b.tuner.pathChanged()
+			if path != 0 && b.tuner != nil {
+				b.tuner.pathChangedTo(path)
 			}
 			if path != 0 {
 				b.tuningPath = path
@@ -1330,27 +1417,29 @@ func (b *BIP) processNativeBatch(ctx context.Context, packets [][]byte) {
 }
 func (b *BIP) flushDataBatch() {
 	packets := b.dataBatch
+	metadata := b.dataBatchWire
 	if len(packets) == 0 {
 		return
 	}
 	b.dataBatch = nil
+	b.dataBatchWire = nil
 	if b.batchEmit == nil {
-		for _, packet := range packets {
-			b.recordWireResult(packet, b.emit(packet) == nil)
+		for i, packet := range packets {
+			b.recordWireResult(packet, b.emit(packet) == nil, metadata[i])
 		}
 		return
 	}
 	n, err := b.batchEmit(packets)
 	if errors.Is(err, syscall.ENOSYS) {
 		b.batchEmit = nil
-		for _, packet := range packets {
-			b.recordWireResult(packet, b.emit(packet) == nil)
+		for i, packet := range packets {
+			b.recordWireResult(packet, b.emit(packet) == nil, metadata[i])
 		}
 		return
 	}
 	n = max(0, min(n, len(packets)))
 	for i, packet := range packets {
-		b.recordWireResult(packet, i < n)
+		b.recordWireResult(packet, i < n, metadata[i])
 	}
 	// Every DATA frame was retained in pending before preparation. The unsent
 	// suffix therefore takes the same paced retry path as a scalar send error.
@@ -1365,13 +1454,14 @@ func (b *BIP) send(typ byte, id, tuple uint16, kind, flags byte, token uint32, p
 	}
 	if kind == bipKindData && b.collectDATA && b.batchEmit != nil {
 		b.dataBatch = append(b.dataBatch, ip)
+		b.dataBatchWire = append(b.dataBatchWire, b.preparedWire)
 		if len(b.dataBatch) >= 64 {
 			b.flushDataBatch()
 		}
 		return nil
 	}
 	err = b.emit(ip)
-	b.recordWireResult(ip, err == nil)
+	b.recordWireResult(ip, err == nil, b.preparedWire)
 	return err
 }
 func (b *BIP) prepareWire(typ byte, id, tuple uint16, kind, flags byte, token uint32, payload []byte, target uint64) ([]byte, error) {
@@ -1379,6 +1469,10 @@ func (b *BIP) prepareWire(typ byte, id, tuple uint16, kind, flags byte, token ui
 		return nil, errors.New("carrier not started")
 	}
 	b.packetNo++
+	if b.compactMode() && b.packetNo > 0xffffffff {
+		b.fail(frame.ErrKeyLifetime)
+		return nil, frame.ErrKeyLifetime
+	}
 	if b.packetNo == 0 {
 		return nil, errors.New("packet counter exhausted")
 	}
@@ -1387,14 +1481,26 @@ func (b *BIP) prepareWire(typ byte, id, tuple uint16, kind, flags byte, token ui
 		payload = b.ackExtension(ack)
 	}
 	p := wirePacket{typ: typ, kind: kind, flags: flags, id: id, tuple: tuple, sender: b.localID, target: target, number: b.packetNo, token: token, ack: ack, sack: sack, payload: payload}
-	if 20+72+len(payload) > 1500 {
-		return nil, syscall.EMSGSIZE
-	}
-	// Encode directly after the IPv4 header: no second full DATA allocation
-	// and copy before the synchronous packet backend consumes the buffer.
-	ip := make([]byte, 20+72+len(payload))
-	if err := b.writeBody(p, ip[20:]); err != nil {
-		return nil, err
+	b.preparedWire = p
+	b.preparedWire.payload = nil
+	var ip []byte
+	if b.compactMode() {
+		body, err := b.encodeCompact(p)
+		if err != nil {
+			return nil, err
+		}
+		ip = make([]byte, 20+len(body))
+		copy(ip[20:], body)
+	} else {
+		if 20+72+len(payload) > 1500 {
+			return nil, syscall.EMSGSIZE
+		}
+		// Encode directly after the IPv4 header: no second full DATA allocation
+		// and copy before the synchronous packet backend consumes the buffer.
+		ip = make([]byte, 20+72+len(payload))
+		if err := b.writeBody(p, ip[20:]); err != nil {
+			return nil, err
+		}
 	}
 	ip[0] = 0x45
 	binary.BigEndian.PutUint16(ip[2:4], uint16(len(ip)))
@@ -1406,17 +1512,24 @@ func (b *BIP) prepareWire(typ byte, id, tuple uint16, kind, flags byte, token ui
 	binary.BigEndian.PutUint16(ip[10:12], checksum(ip[:20]))
 	return ip, nil
 }
-func (b *BIP) recordWireResult(ip []byte, success bool) {
+func (b *BIP) recordWireResult(ip []byte, success bool, metadata ...wirePacket) {
 	body := ip[20:]
+	var p wirePacket
+	if len(metadata) > 0 {
+		p = metadata[0]
+	} else {
+		p = wirePacket{typ: body[0], kind: body[12], token: binary.BigEndian.Uint32(body[40:44]), target: binary.BigEndian.Uint64(body[24:32]), ack: binary.BigEndian.Uint32(body[44:48]), sack: binary.BigEndian.Uint64(body[48:56])}
+	}
 	if b.trace != nil {
-		b.traceRecord(traceEvent{At: time.Now(), Event: "wire_tx", Seq: binary.BigEndian.Uint32(body[40:44]), Ack: binary.BigEndian.Uint32(body[44:48]), Sack: binary.BigEndian.Uint64(body[48:56]), Kind: body[12], Type: body[0], Error: !success})
+		b.traceRecord(traceEvent{At: time.Now(), Event: "wire_tx", Seq: p.token, Ack: p.ack, Sack: p.sack, Kind: p.kind, Type: p.typ, Error: !success})
 	}
 	if !success {
 		b.txErrors.Add(1)
 		return
 	}
 	b.wireTxBytes.Add(uint64(len(ip)))
-	if body[12] == bipKindData {
+	b.coalesceAck(p)
+	if p.kind == bipKindData {
 		b.dataWireTxBytes.Add(uint64(len(ip)))
 	} else {
 		b.controlTxBytes.Add(uint64(len(ip)))
@@ -1429,6 +1542,9 @@ func (b *BIP) macKey(kind byte) []byte {
 	return b.sessionKey
 }
 func (b *BIP) encode(p wirePacket) ([]byte, error) {
+	if b.compactMode() {
+		return b.encodeCompact(p)
+	}
 	body := make([]byte, 72+len(p.payload))
 	if err := b.writeBody(p, body); err != nil {
 		return nil, err
@@ -1468,6 +1584,9 @@ func packetMAC(key, body []byte) [16]byte {
 	return tag
 }
 func (b *BIP) decode(body []byte) (wirePacket, error) {
+	if b.compactMode() {
+		return b.decodeCompact(body)
+	}
 	var p wirePacket
 	if len(body) < 72 || len(body) > 1480 || string(body[8:12]) != bipMagic || (body[0] != 0 && body[0] != 8) || body[1] != 0 || body[14] != 0 || body[15] != 0 || checksum(body) != 0 {
 		return p, errors.New("malformed BIP5")
@@ -1531,6 +1650,9 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 		PeerAuthenticated:     b.peerID.Load() != 0,
 		PeerSilenceMS:         b.peerSilenceMS.Load(),
 		RehandshakeTries:      b.rehandshakeTries.Load(),
+		HandshakeWaitMS:       b.handshakeWaitMS.Load(),
+		ACKsCoalesced:         b.acksCoalesced.Load(),
+		WireMode:              b.cfg.Transport.BIPWireMode,
 		PathSuspended:         b.pathSuspended.Load(),
 		FastRetransmits:       b.fastRetries.Load(),
 		ReorderBuffered:       b.rxBuffered.Load(),

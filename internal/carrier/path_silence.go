@@ -38,8 +38,16 @@ func (b *BIP) observePeerActivity(now time.Time) {
 func (b *BIP) maintainPeerLiveness(now time.Time) error {
 	if b.active == 0 || b.lastPeerActivity.IsZero() {
 		b.peerSilenceMS.Store(0)
+		if b.active == 0 && !b.startedAt.IsZero() {
+			wait := max(0, now.Sub(b.startedAt))
+			b.handshakeWaitMS.Store(wait.Milliseconds())
+			if wait >= time.Duration(b.cfg.Transport.BIPHandshakeTimeoutSec)*time.Second {
+				return fmt.Errorf("%w after %s; check both peer addresses, PSK and outer network reachability", ErrBIPHandshakeTimeout, wait.Round(time.Second))
+			}
+		}
 		return nil
 	}
+	b.handshakeWaitMS.Store(0)
 	silent := max(0, now.Sub(b.lastPeerActivity))
 	b.peerSilenceMS.Store(silent.Milliseconds())
 	if !b.pathUnresponsive(now) {

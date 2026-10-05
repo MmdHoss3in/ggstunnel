@@ -2,6 +2,31 @@ package carrier
 
 import "time"
 
+// A successfully emitted packet can carry the ACK instead of a separate
+// control packet. Preserve the reply/request direction for stateful paths,
+// and keep dedicated ACKs when the receiver needs the wide SACK extension.
+func (b *BIP) coalesceAck(p wirePacket) {
+	if b.ackDue.IsZero() || p.kind >= bipKindHello || p.kind == bipKindAck || p.typ != b.ackType || p.target != b.active {
+		return
+	}
+	ack, sack := b.takeAckForSend()
+	if p.ack != ack || p.sack&sack != sack {
+		return
+	}
+	b.ackMu.Lock()
+	for seq := range b.rxAck.seen {
+		if sequenceDistance(ack, seq) > 64 {
+			b.ackMu.Unlock()
+			return
+		}
+	}
+	b.ackMu.Unlock()
+	b.ackDue = time.Time{}
+	b.ackCount = 0
+	b.lastAck = time.Now()
+	b.acksCoalesced.Add(1)
+}
+
 // Retain the latest authenticated request tuple so a delayed EchoReply ACK
 // remains usable through a stateful path. Flush every 16 frames or ACK interval.
 // Duplicates get an immediate ACK to recover a lost acknowledgement.

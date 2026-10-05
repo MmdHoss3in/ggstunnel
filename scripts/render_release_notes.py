@@ -35,4 +35,18 @@ if field:
         notes+=f"| {r['architecture']} | {r['case']} | {r['link_mbps']} | {direction} | {r['version_label']} | {r.get('received_mbps','n/a')} | {polls} | {r['status']} |\n"
 elif (root/'field-collected').exists():
     raise SystemExit('Tagged field observation files missing')
+transport=[]
+for path in sorted((root/'transport-collected').glob('*/extended-results/transport-results.jsonl')):
+    transport.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
+if (root/'transport-collected').exists():
+    if len(transport)!=92 or any(r['status']!='pass' for r in transport):
+        raise SystemExit('Missing or failed tagged transport observations')
+    notes+='\n## Native IO and compact wire checks\n\n'
+    notes+='92 observations on amd64/arm64: all six carriers, payload 1280/1348, clean 200/500Mbps links, 80ms RTT, short loss and asymmetric/stateful paths. Low-loss cases have only a connectivity floor; ordered-delivery throughput under loss is not fixed. Accounting cases use no iperf omission and require receiver interval bytes to equal whole-transfer bytes. Raw NIC totals include link headers and idle control.\n\n'
+    notes+='| Arch | Wire | Payload | Direction | Received Mbps | NIC rx / application bytes |\n|---|---|---:|---|---:|---:|\n'
+    for r in transport:
+        if r['case']!='accounting':continue
+        ratio=r.get('nic_to_application_ratio')
+        if ratio is None or r.get('warmup_sec')!=0:raise SystemExit('Tagged application accounting missing')
+        notes+=f"| {r['architecture']} | {r['wire']} | {r['payload']} | {'reverse' if r['reverse'] else 'forward'} | {r['received_mbps']} | {ratio} |\n"
 (root/'artifacts/release-notes.md').write_text(notes)

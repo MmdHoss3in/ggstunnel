@@ -1,10 +1,12 @@
 # ggstunnel — تانل رمز‌شدهٔ ایران ↔ خارج
 
-نسخهٔ **Stable v0.3.1** سربار PULL، retry مسیر نامتقارن، آمار پس از بازیابی و پردازش بسته‌های کوچک را بهبود می‌دهد. [جزئیات اصلاحات](docs/field-performance.md) و [نتایج نسخهٔ تگ‌شده](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.1) دامنهٔ آزمون را مشخص می‌کنند.
+نسخهٔ **v0.3.2** ارسال دسته‌ای TCP/UDP/raw، توقف صحیح workerها، بازیابی اتصال اولیه و شروع کنترل ازدحام در مسیر نامتقارن را بهبود می‌دهد. BIP با قالب legacy پیش‌فرض پایدار است؛ compact قابلیت آزمایشی و انتخابی است. انتشار Stable فقط پس از موفقیت تمام آزمون‌های سورس همان تگ انجام می‌شود. [اصلاحات و محدودیت‌ها](docs/transport-improvements.md) و [نتایج نسخهٔ تگ‌شده](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.2).
 
 [![Linux validation](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml/badge.svg)](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml)
 
-ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سرورها و عبور ترافیک سرویس‌هایی مثل Xray است. هسته با Go و منوی مدیریت با Python نوشته شده است. پروتکل اصلی **BIP5 روی ICMP** است؛ TCP، UDP، ICMP خام و GRE اختصاصی نیز پشتیبانی می‌شوند.
+قالب compact هدر کوچک‌تر و پوشش رمز‌شدهٔ جدید دارد و با گزینهٔ ۲۲ روی **هر دو سمت به‌صورت هماهنگ** فعال می‌شود. کیفیت اتصال، سرعت مفید و هزینه با هم سنجیده می‌شوند؛ هیچ کاهش ACK یا حفاظت رمزنگاری برای رسیدن به یک درصد سربار انجام نمی‌شود. در نمونه‌های کوتاه قبلی، سربار NIC نسبت به دادهٔ برنامه حدود ۱۸ تا ۲۴٪ بود؛ این مقدار تضمین هزینهٔ مسیر شما نیست. قالب legacy و payload برابر 1280 پیش‌فرض می‌مانند.
+
+ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سرورها و عبور ترافیک سرویس‌هایی مثل Xray است. هسته با Go و منوی مدیریت با Python نوشته شده است. پروتکل اصلی **BIP روی ICMP** است؛ TCP، UDP، ICMP خام، GRE و IPIP اختصاصی نیز پشتیبانی می‌شوند.
 
 انتشار به موفقیت تست‌های همان سورس تگ‌شده وابسته است. آزمایش‌های ابری جای مشاهدهٔ چندروزهٔ مسیر واقعی ایران–خارج را نمی‌گیرند. افت بسته و ICMP policing همچنان می‌توانند سرعت را محدود کنند؛ بازیابی کامل ممکن است اتصال کاربران را قطع و وصل کند.
 
@@ -15,11 +17,11 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.1/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.2/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh install
 ```
 
-نصاب بستهٔ باینری و سورس را از [Release v0.3.1](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.1) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند.
+نصاب بستهٔ باینری و سورس را از [Release v0.3.2](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.2) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. تا پیش از انتشار موفق Release، این لینک‌ها برای نصب قابل استفاده نیستند.
 
 **برای دفعات بعد فقط منو را باز کنید؛ هیچ نصب، دانلود یا بررسی پیش‌نیازی انجام نمی‌شود:**
 
@@ -37,7 +39,7 @@ sudo bash setup.sh menu
 
 ### نصب دستی یا آفلاین
 
-فایل‌های `ggstunnel-linux.tar.gz` و `SHA256SUMS` را از [Release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.1) دانلود و کنار هم قرار دهید:
+فایل‌های `ggstunnel-linux.tar.gz` و `SHA256SUMS` را از [Release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.2) دانلود و کنار هم قرار دهید:
 
 ```bash
 sha256sum -c SHA256SUMS
@@ -80,6 +82,7 @@ sudo bash setup.sh install
 | UDP | پورت UDP ثابت در هر دو سمت | بازفرست مستقل carrier ندارد؛ NAT roaming پشتیبانی نمی‌شود |
 | ICMP خام | ICMP بین دو همتا | حامل ساده‌تر، بدون قابلیت اطمینان BIP |
 | GRE | پروتکل IP شمارهٔ 47 | حامل اختصاصی رمز‌شده؛ با GRE معمولی MikroTik یا ip tunnel سازگار نیست |
+| IPIP | پروتکل IP شمارهٔ 4 | حامل اختصاصی رمز‌شده؛ با IPIP استاندارد سازگار نیست |
 
 برنامه قوانین عمومی firewall، nftables، WireGuard یا AmneziaWG را بازنویسی نمی‌کند. مجازبودن ping به‌تنهایی تضمین عبور مناسب ترافیک حجیم ICMP نیست.
 
@@ -98,6 +101,7 @@ sudo bash setup.sh install
 | 18 / 19 | نصب از پوشهٔ نسخهٔ جدید / rollback |
 | 20 | تست مداوم؛ چهار آزمایش 10دقیقه‌ای |
 | 21 | اعمال پیش‌فرض‌های کارایی BIP بر کانفیگ‌های قبلی |
+| 22 | انتخاب هماهنگ legacy / compact آزمایشی و payload/MTU برای BIP |
 
 ```bash
 sudo ggstunnel status
@@ -113,11 +117,13 @@ sudo ggstunnel diagnose all
 ## ارتقا و بازگشت
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.1/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.2/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh update
 ```
 
-نسخهٔ 0.3.1 با BIP5 نسخه‌های rc4، 0.3.0 و 0.3.1-rc1 سازگار است؛ پنجره بزرگ‌تر فقط پس از مذاکره احراز هویت فعال می‌شود. برای بهره‌بردن از تمام اصلاحات، **هر دو سمت را ارتقا دهید**. BIP3/BIP4 با BIP5 سازگار نیستند. پیش‌فرض‌های قدیمی را در صورت نیاز با گزینهٔ 21 به‌روز کنید؛ پیکربندی سفارشی خود را ابتدا بررسی کنید.
+ابتدا خارج و سپس ایران را ارتقا دهید. در حالت legacy، سازگاری BIP5 با rc4، 0.3.0 و 0.3.1-rc1 آزمایش می‌شود؛ کانفیگ‌های v0.3.1 قالب خود را حفظ می‌کنند. پنجره بزرگ‌تر فقط پس از مذاکره احراز هویت فعال می‌شود. برای بهره‌بردن از تمام اصلاحات، **هر دو سمت را ارتقا دهید**. BIP3/BIP4 با BIP5 سازگار نیستند. پیش‌فرض‌های قدیمی را در صورت نیاز با گزینهٔ 21 به‌روز کنید؛ پیکربندی سفارشی خود را ابتدا بررسی کنید.
+
+compact با legacy سازگار نیست و به‌صورت خودکار جایگزین آن نمی‌شود. برای آزمایش، پس از ارتقای هر دو طرف در ایران گزینهٔ 22 را انتخاب کنید و کد محرمانهٔ جدید GGS3 را با گزینهٔ 2 و REPLACE روی خارج اعمال کنید. تغییر یک‌طرفه اتصال را قطع می‌کند. برای برگشت به legacy، همین کار را با legacy و کد GGS2 تکرار کنید. payload برابر 1348 فقط با MTU کافی مسیر بیرونی مناسب است؛ تشخیص خودکار PMTU نداریم. compact فیلتر جداگانه‌ای برای EchoReply تکراری کرنل دارد که فقط alias همتای احرازشده را بین همان دو IP بیرونی تطبیق می‌دهد؛ پاسخ واقعی تانل و ping معمولی عبور می‌کنند. وضعیت را در `kernel_echo_filter` ببینید؛ نبود ابزار/ماژول اتصال را متوقف نمی‌کند.
 
 کانفیگ‌ها در `/etc/ggstunnel/tunnels`، نسخه‌ها در `/opt/ggstunnel/releases` و گزارش‌ها در `/etc/ggstunnel/reports` هستند. نصب، کانفیگ‌ها را با باینری جدید اعتبارسنجی می‌کند و فقط سرویس‌های درحال اجرا را restart می‌کند. اگر راه‌اندازی فوری شکست بخورد نسخه و فایل سرویس systemd قبلی را برمی‌گرداند؛ این بررسی، سلامت WAN را تضمین نمی‌کند.
 

@@ -7,9 +7,17 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: linux-validation-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
+  transport-validation:
+    uses: ./.github/workflows/compact-validation.yml
   field-performance-validation:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.head_ref == 'feature/compact-wire'
     uses: ./.github/workflows/field-performance.yml
   extended-validation:
     if: github.head_ref != 'fix/bip-silent-recovery' && (github.ref != 'refs/heads/release/rc5' || contains(github.event.head_commit.message, '[cloud-matrix]'))
@@ -26,7 +34,8 @@ jobs:
           cache: false
       - name: Format and static checks
         run: |
-          test -z "$(gofmt -l cmd internal)"
+          unformatted=$(gofmt -l cmd internal)
+          if [[ -n "$unformatted" ]]; then printf '%s\n' "$unformatted"; exit 1; fi
           go vet ./...
           bash -n setup.sh install.sh scripts/build-release.sh
           python3 scripts/check_version.py
@@ -34,10 +43,12 @@ jobs:
         run: go test -race -tags audit -short -count=1 -timeout 5m ./...
       - name: Fuzz authenticated wire parsers and tuner
         run: |
-          go test ./internal/carrier -run '^$' -fuzz '^FuzzBIPWireParser$' -fuzztime 10s
-          go test ./internal/carrier -run '^$' -fuzz '^FuzzTunerEventBounds$' -fuzztime 10s
-          go test ./internal/carrier -run '^$' -fuzz '^FuzzPackedFrameBounds$' -fuzztime 10s
-          go test ./internal/frame -run '^$' -fuzz '^FuzzFrameParser$' -fuzztime 10s
+          # Iteration budgets avoid the fuzztime deadline race (golang/go#75804).
+          # A separate test timeout still fails hung targets; no errors are ignored.
+          go test ./internal/carrier -run '^$' -fuzz '^FuzzBIPWireParser$' -fuzztime 500000x -fuzzminimizetime 1000x -timeout 2m
+          go test ./internal/carrier -run '^$' -fuzz '^FuzzTunerEventBounds$' -fuzztime 50000x -fuzzminimizetime 1000x -timeout 2m
+          go test ./internal/carrier -run '^$' -fuzz '^FuzzPackedFrameBounds$' -fuzztime 500000x -fuzzminimizetime 1000x -timeout 2m
+          go test ./internal/frame -run '^$' -fuzz '^FuzzFrameParser$' -fuzztime 2000000x -fuzzminimizetime 1000x -timeout 2m
       - name: Build release binaries
         run: bash scripts/build-release.sh
       - name: Manager and installer tests
@@ -99,13 +110,18 @@ jobs:
           bash scripts/build-release.sh
           python3 -m unittest discover -s scripts -p 'test_*.py' -v
           sudo apt-get update -qq
-          sudo apt-get install -y iptables ethtool
+          sudo apt-get install -y iptables ethtool iperf3
           sudo env GITHUB_ACTIONS=true python3 scripts/smoke_systemd.py
           sudo env GITHUB_ACTIONS=true python3 scripts/smoke_echo_filter.py
           printf '0\n' | sudo /usr/local/bin/ggstunnel
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: platform-smoke-${{ matrix.runner }}
+          path: extended-results/
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [validate, platform-smoke, extended-validation, field-performance-validation]
+    needs: [validate, platform-smoke, extended-validation, field-performance-validation, transport-validation]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -123,6 +139,10 @@ jobs:
         with:
           pattern: field-performance-*
           path: field-collected
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: transport-validation-*
+          path: transport-collected
       - name: Publish tested version
         env:
           GH_TOKEN: ${{ github.token }}
@@ -130,6 +150,7 @@ jobs:
           test "$GITHUB_REF_NAME" = "v$(cat internal/version/VERSION)"
           python3 scripts/render_release_notes.py
           tar -czf artifacts/field-performance-results.tar.gz -C field-collected .
+          tar -czf artifacts/transport-validation-results.tar.gz -C transport-collected .
           flags=(--latest)
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl artifacts/recovery-results.jsonl artifacts/extended-summary.json artifacts/extended-report.md artifacts/field-performance-results.tar.gz --verify-tag "${flags[@]}" --title "ggstunnel $GITHUB_REF_NAME" --notes-file artifacts/release-notes.md
+          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl artifacts/recovery-results.jsonl artifacts/extended-summary.json artifacts/extended-report.md artifacts/field-performance-results.tar.gz artifacts/transport-validation-results.tar.gz --verify-tag "${flags[@]}" --title "ggstunnel $GITHUB_REF_NAME" --notes-file artifacts/release-notes.md

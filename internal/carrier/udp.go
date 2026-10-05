@@ -2,6 +2,7 @@ package carrier
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"ggstunnel/internal/config"
 	"net"
@@ -19,6 +20,9 @@ type UDP struct {
 	closeOnce sync.Once
 	closeCh   chan struct{}
 	errors    chan error
+	startMu   sync.Mutex
+	started   bool
+	workers   sync.WaitGroup
 }
 
 func NewUDP(c *config.Config) *UDP {
@@ -27,8 +31,20 @@ func NewUDP(c *config.Config) *UDP {
 func (u *UDP) Name() string         { return "udp" }
 func (u *UDP) Recv() <-chan []byte  { return u.rx }
 func (u *UDP) Errors() <-chan error { return u.errors }
-func (u *UDP) Send(b []byte) error  { return enqueue(u.tx, b) }
+func (u *UDP) Send(b []byte) error  { return enqueueOpen(u.closeCh, u.tx, b) }
 func (u *UDP) Start(ctx context.Context) error {
+	u.startMu.Lock()
+	defer u.startMu.Unlock()
+	if u.started {
+		return errors.New("UDP carrier already started")
+	}
+	select {
+	case <-u.closeCh:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 	p, err := net.ResolveUDPAddr("udp4", u.cfg.Real.PeerAddr)
 	if err != nil {
 		return err
@@ -44,12 +60,18 @@ func (u *UDP) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	u.conn = c
-	u.peer = p
-	c.SetReadBuffer(u.cfg.Transport.SockBuf)
-	c.SetWriteBuffer(u.cfg.Transport.SockBuf)
-	go u.readLoop(ctx)
-	go u.writeLoop(ctx)
+	if err := c.SetReadBuffer(u.cfg.Transport.SockBuf); err != nil {
+		c.Close()
+		return err
+	}
+	if err := c.SetWriteBuffer(u.cfg.Transport.SockBuf); err != nil {
+		c.Close()
+		return err
+	}
+	u.conn, u.peer, u.started = c, p, true
+	u.workers.Add(2)
+	go func() { defer u.workers.Done(); u.readLoop(ctx) }()
+	go func() { defer u.workers.Done(); u.writeLoop(ctx) }()
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -65,7 +87,7 @@ func (u *UDP) fail(err error) {
 	default:
 	}
 }
-func (u *UDP) readLoop(ctx context.Context) {
+func (u *UDP) readLoopScalar(ctx context.Context) {
 	buf := make([]byte, 65535)
 	for {
 		n, src, err := u.conn.ReadFromUDP(buf)
@@ -84,13 +106,15 @@ func (u *UDP) readLoop(ctx context.Context) {
 		b := append([]byte(nil), buf[:n]...)
 		select {
 		case u.rx <- b:
+		case <-u.closeCh:
+			return
 		case <-ctx.Done():
 			return
 		default:
 		}
 	}
 }
-func (u *UDP) writeLoop(ctx context.Context) {
+func (u *UDP) writeLoopScalar(ctx context.Context) {
 	for {
 		select {
 		case b := <-u.tx:
@@ -108,10 +132,13 @@ func (u *UDP) writeLoop(ctx context.Context) {
 }
 func (u *UDP) Close() error {
 	u.closeOnce.Do(func() {
+		u.startMu.Lock()
+		defer u.startMu.Unlock()
 		close(u.closeCh)
 		if u.conn != nil {
 			u.conn.Close()
 		}
 	})
+	u.workers.Wait()
 	return nil
 }

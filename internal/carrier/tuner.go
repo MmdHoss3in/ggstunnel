@@ -16,11 +16,15 @@ type bipTuner struct {
 	cwnd, threshold, credit         float64
 	lastCredit, recoveryUntil       time.Time
 	acked, samples, cuts, resets    uint64
+	activePath                      byte
+	pathThresholds                  [4]float64
 }
 
 type TunerSnapshot struct {
 	WindowLimit    int     `json:"window_limit_frames"`
 	Mode           string  `json:"mode"`
+	PathMode       string  `json:"path_mode,omitempty"`
+	Threshold      int     `json:"slow_start_threshold_frames,omitempty"`
 	SRTTMS         float64 `json:"srtt_ms"`
 	RTTVariationMS float64 `json:"rtt_variation_ms"`
 	RTOMS          float64 `json:"rto_ms"`
@@ -34,6 +38,13 @@ type TunerSnapshot struct {
 }
 
 func (t *bipTuner) resizeWindow(limit int) {
+	for i, threshold := range t.pathThresholds {
+		if threshold >= float64(t.maxWindow) {
+			t.pathThresholds[i] = float64(limit)
+		} else {
+			t.pathThresholds[i] = math.Min(threshold, float64(limit))
+		}
+	}
 	if t.threshold >= float64(t.maxWindow) {
 		t.threshold = float64(limit)
 	}
@@ -64,6 +75,8 @@ func (t *bipTuner) reset() {
 	t.credit = float64(t.burst())
 	t.lastCredit = time.Time{}
 	t.recoveryUntil = time.Time{}
+	t.activePath = 0
+	t.pathThresholds = [4]float64{}
 	t.resets++
 }
 func (t *bipTuner) window() int {
@@ -175,11 +188,29 @@ func (t *bipTuner) pathChanged() {
 	t.srtt = 0
 	t.variance = 0
 	t.rto = t.clampRTO(t.initialRTO)
-	// Preserve the previous slow-start threshold too. Setting it to cwnd
-	// here would turn an early PULL->FAST transition into slow additive
-	// growth at a tiny window even though no congestion was observed.
+	// Never set the threshold to the current flight merely because timing
+	// changed: that would invent a new congestion event at a tiny window.
 	t.credit = math.Min(t.credit, float64(t.burst()))
 	t.resets++
+}
+
+// FAST, PULL and request/compat have different delivery constraints. Learn a
+// loss threshold per path instead of exporting blocked-bootstrap congestion
+// into a newly authenticated usable carrier. Preserve current flight/credit;
+// revisiting a path restores its previously learned loss threshold.
+func (t *bipTuner) pathChangedTo(path byte) {
+	if !t.adaptive() || path < pendingModeFast || path > pendingModeRequest || path == t.activePath {
+		return
+	}
+	if t.activePath != 0 {
+		t.pathThresholds[t.activePath] = t.threshold
+	}
+	t.pathChanged()
+	t.activePath = path
+	t.threshold = t.pathThresholds[path]
+	if t.threshold == 0 {
+		t.threshold = float64(t.maxWindow)
+	}
 }
 func (t *bipTuner) timeout(retries int) time.Duration {
 	if !t.adaptive() {
@@ -191,5 +222,9 @@ func (t *bipTuner) snapshot() TunerSnapshot {
 	if !t.adaptive() {
 		return TunerSnapshot{WindowLimit: t.maxWindow, Mode: t.cfg.Mode, RTOMS: float64(t.initialRTO) / float64(time.Millisecond), Window: t.maxWindow, AckedFrames: t.acked, Resets: t.resets}
 	}
-	return TunerSnapshot{WindowLimit: t.maxWindow, Mode: t.cfg.Mode, SRTTMS: float64(t.srtt) / float64(time.Millisecond), RTTVariationMS: float64(t.variance) / float64(time.Millisecond), RTOMS: float64(t.rto) / float64(time.Millisecond), Window: t.window(), PacingPPS: t.rate(), Burst: t.burst(), AckedFrames: t.acked, RTTSamples: t.samples, CongestionCuts: t.cuts, Resets: t.resets}
+	pathMode := ""
+	if t.activePath > 0 && t.activePath < 4 {
+		pathMode = [4]string{"", "fast", "pull", "compat"}[t.activePath]
+	}
+	return TunerSnapshot{WindowLimit: t.maxWindow, Mode: t.cfg.Mode, PathMode: pathMode, Threshold: int(t.threshold), SRTTMS: float64(t.srtt) / float64(time.Millisecond), RTTVariationMS: float64(t.variance) / float64(time.Millisecond), RTOMS: float64(t.rto) / float64(time.Millisecond), Window: t.window(), PacingPPS: t.rate(), Burst: t.burst(), AckedFrames: t.acked, RTTSamples: t.samples, CongestionCuts: t.cuts, Resets: t.resets}
 }

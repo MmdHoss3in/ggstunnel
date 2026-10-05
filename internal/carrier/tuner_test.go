@@ -11,6 +11,40 @@ func adaptiveTuner() *bipTuner {
 	c.Tuner.Mode = "adaptive"
 	return newBIPTuner(c)
 }
+
+func TestTunerNewCarrierDoesNotInheritBootstrapThreshold(t *testing.T) {
+	for _, clean := range []int{0, 16, 256} {
+		x := adaptiveTuner()
+		now := time.Unix(100, 0)
+		x.pathChangedTo(pendingModeRequest)
+		x.onAck(clean, 80*time.Millisecond, now)
+		x.onTimeout(now.Add(time.Second))
+		bootstrapThreshold, window, credit := x.threshold, x.window(), x.credit
+		x.pathChangedTo(pendingModeFast)
+		if x.window() != window || x.credit != credit || x.threshold != float64(x.maxWindow) {
+			t.Fatal("new carrier must retain flight/credit and learn its own capacity")
+		}
+		x.onAck(16, 80*time.Millisecond, now.Add(2*time.Second))
+		if x.window() != window+16 {
+			t.Fatal("working path inherited blocked bootstrap additive recovery")
+		}
+		x.onTimeout(now.Add(3 * time.Second))
+		fastThreshold, window := x.threshold, x.window()
+		x.pathChangedTo(pendingModeRequest)
+		if x.threshold != bootstrapThreshold || x.window() != window {
+			t.Fatal("request path lost its congestion history")
+		}
+		x.pathChangedTo(pendingModeFast)
+		if x.threshold != fastThreshold || x.window() != window {
+			t.Fatal("revisited FAST path lost its congestion history")
+		}
+		resets := x.resets
+		x.pathChangedTo(pendingModeFast)
+		if x.resets != resets {
+			t.Fatal("unchanged carrier reset timing")
+		}
+	}
+}
 func TestTunerDelayLossRecoveryAndBounds(t *testing.T) {
 	x := adaptiveTuner()
 	now := time.Unix(100, 0)

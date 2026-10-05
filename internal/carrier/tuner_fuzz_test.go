@@ -17,7 +17,7 @@ func FuzzTunerEventBounds(f *testing.F) {
 		now := time.Unix(100, 0)
 		for _, e := range events {
 			now = now.Add(time.Duration(int(e)+1) * time.Millisecond)
-			switch e % 5 {
+			switch e % 6 {
 			case 0:
 				x.onAck(int(e)+1, time.Duration(int(e)+1)*time.Millisecond, now)
 			case 1:
@@ -28,6 +28,8 @@ func FuzzTunerEventBounds(f *testing.F) {
 				x.allow(now, true)
 			case 4:
 				x.reset()
+			case 5:
+				x.pathChangedTo(1 + (e/6)%3)
 			}
 			s := x.snapshot()
 			if s.Window < 1 || s.Window > x.maxWindow || s.RTOMS < float64(x.cfg.MinRTOMS) || s.RTOMS > float64(x.cfg.MaxRTOMS) || s.PacingPPS > float64(x.cfg.MaxPPS) || s.PacingPPS <= 0 || math.IsNaN(s.PacingPPS) || math.IsInf(s.PacingPPS, 0) {

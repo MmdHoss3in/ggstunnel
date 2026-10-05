@@ -16,38 +16,60 @@ import (
 )
 
 type TCP struct {
-	cfg       *config.Config
-	rx, tx    chan []byte
-	closeOnce sync.Once
-	closeCh   chan struct{}
-	ln        net.Listener
-	mu        sync.Mutex
-	sessionMu sync.Mutex
-	active    net.Conn
+	cfg         *config.Config
+	rx, tx      chan []byte
+	closeOnce   sync.Once
+	closeCh     chan struct{}
+	ln          net.Listener
+	mu          sync.Mutex
+	sessionMu   sync.Mutex
+	active      net.Conn
+	startMu     sync.Mutex
+	started     bool
+	cancel      context.CancelFunc
+	workers     sync.WaitGroup
+	connections map[net.Conn]struct{}
 }
 
 func NewTCP(c *config.Config) *TCP {
-	return &TCP{cfg: c, rx: make(chan []byte, c.Performance.QueueSize), tx: make(chan []byte, min(c.Performance.QueueSize, 256)), closeCh: make(chan struct{})}
+	return &TCP{cfg: c, rx: make(chan []byte, c.Performance.QueueSize), tx: make(chan []byte, min(c.Performance.QueueSize, 256)), closeCh: make(chan struct{}), connections: make(map[net.Conn]struct{})}
 }
 func (t *TCP) Name() string        { return "tcp" }
 func (t *TCP) Recv() <-chan []byte { return t.rx }
-func (t *TCP) Send(b []byte) error { return enqueue(t.tx, b) }
+func (t *TCP) Send(b []byte) error { return enqueueOpen(t.closeCh, t.tx, b) }
 
 func (t *TCP) SendContext(ctx context.Context, b []byte) error {
 	return enqueueContext(ctx, t.closeCh, t.tx, b)
 }
 
 func (t *TCP) Start(ctx context.Context) error {
+	t.startMu.Lock()
+	defer t.startMu.Unlock()
+	if t.started {
+		return fmt.Errorf("TCP carrier already started")
+	}
+	select {
+	case <-t.closeCh:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	ctx, cancel := context.WithCancel(ctx)
 	if t.cfg.Role == "server" {
 		ln, err := net.Listen("tcp4", t.cfg.Real.ListenAddr)
 		if err != nil {
+			cancel()
 			return err
 		}
 		t.ln = ln
-		go t.serve(ctx, ln)
+		t.workers.Add(1)
+		go func() { defer t.workers.Done(); t.serve(ctx, ln) }()
 	} else {
-		go t.dialLoop(ctx)
+		t.workers.Add(1)
+		go func() { defer t.workers.Done(); t.dialLoop(ctx) }()
 	}
+	t.cancel, t.started = cancel, true
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -74,7 +96,15 @@ func (t *TCP) serve(ctx context.Context, ln net.Listener) {
 			c.Close()
 			continue
 		}
+		if !t.track(c) {
+			c.Close()
+			<-slots
+			return
+		}
+		t.workers.Add(1)
 		go func() {
+			defer t.workers.Done()
+			defer t.untrack(c)
 			defer func() { <-slots }()
 			if err := t.serverHandshake(c); err != nil {
 				c.Close()
@@ -105,17 +135,40 @@ func (t *TCP) dialLoop(ctx context.Context) {
 		}
 		c, err := d.DialContext(ctx, "tcp4", t.cfg.Real.PeerAddr)
 		if err == nil {
+			if !t.track(c) {
+				c.Close()
+				return
+			}
 			err = t.clientHandshake(c)
 			if err != nil {
 				c.Close()
 			} else {
 				t.session(ctx, c)
 			}
+			t.untrack(c)
 		}
 		if !t.pause(ctx) {
 			return
 		}
 	}
+}
+
+func (t *TCP) track(c net.Conn) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	select {
+	case <-t.closeCh:
+		return false
+	default:
+	}
+	t.connections[c] = struct{}{}
+	return true
+}
+
+func (t *TCP) untrack(c net.Conn) {
+	t.mu.Lock()
+	delete(t.connections, c)
+	t.mu.Unlock()
 }
 func (t *TCP) tune(c net.Conn) {
 	if tc, ok := c.(*net.TCPConn); ok {
@@ -130,6 +183,13 @@ func (t *TCP) tune(c net.Conn) {
 func (t *TCP) session(parent context.Context, c net.Conn) {
 	// Only an authenticated new connection can replace an old connection.
 	t.mu.Lock()
+	select {
+	case <-t.closeCh:
+		t.mu.Unlock()
+		c.Close()
+		return
+	default:
+	}
 	if t.active != nil {
 		t.active.Close()
 	}
@@ -215,20 +275,28 @@ func writeFull(w io.Writer, b []byte) error {
 	return nil
 }
 func (t *TCP) writeLoop(ctx context.Context, c net.Conn) error {
-	buf := make([]byte, 0, 64<<10)
+	// Native TCP uses writev: frame payloads are already owned by the bounded
+	// transmit queue, so batching does not need another concatenation/copy.
+	var headers [32][4]byte
+	buf := make(net.Buffers, 0, 64)
+	count, size := 0, 0
 	appendFrame := func(b []byte) {
-		buf = binary.BigEndian.AppendUint32(buf, uint32(len(b)))
-		buf = append(buf, b...)
+		binary.BigEndian.PutUint32(headers[count][:], uint32(len(b)))
+		buf = append(buf, headers[count][:], b)
+		count++
+		size += 4 + len(b)
 	}
 	for {
 		select {
 		case b := <-t.tx:
+			clear(buf)
 			buf = buf[:0]
+			count, size = 0, 0
 			appendFrame(b)
 			// Batch only frames already queued. Never wait on a batching timer:
 			// an isolated ACK/control frame is written immediately.
 		batch:
-			for count := 1; count < 32 && len(buf) < 64<<10; count++ {
+			for count < 32 && size < 64<<10 {
 				select {
 				case next := <-t.tx:
 					appendFrame(next)
@@ -237,7 +305,7 @@ func (t *TCP) writeLoop(ctx context.Context, c net.Conn) error {
 				}
 			}
 			c.SetWriteDeadline(time.Now().Add(t.cfg.IdleTimeout()))
-			if err := writeFull(c, buf); err != nil {
+			if err := writeBuffersFull(c, buf, size); err != nil {
 				return err
 			}
 		case <-ctx.Done():
@@ -246,6 +314,26 @@ func (t *TCP) writeLoop(ctx context.Context, c net.Conn) error {
 			return io.EOF
 		}
 	}
+}
+
+func writeBuffersFull(c net.Conn, buffers net.Buffers, size int) error {
+	if _, ok := c.(*net.TCPConn); ok {
+		n, err := buffers.WriteTo(c)
+		if err != nil {
+			return err
+		}
+		if n != int64(size) {
+			return io.ErrShortWrite
+		}
+		return nil
+	}
+	// net.Pipe and injected test connections need the short-write fallback.
+	for _, b := range buffers {
+		if err := writeFull(c, b); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (t *TCP) proof(label string, nonce []byte) []byte {
 	h := hmac.New(sha256.New, []byte(t.cfg.PSK))
@@ -303,15 +391,24 @@ func (t *TCP) serverHandshake(c net.Conn) error {
 }
 func (t *TCP) Close() error {
 	t.closeOnce.Do(func() {
+		t.startMu.Lock()
+		defer t.startMu.Unlock()
 		close(t.closeCh)
+		if t.cancel != nil {
+			t.cancel()
+		}
 		if t.ln != nil {
 			t.ln.Close()
 		}
 		t.mu.Lock()
+		for c := range t.connections {
+			c.Close()
+		}
 		if t.active != nil {
 			t.active.Close()
 		}
 		t.mu.Unlock()
 	})
+	t.workers.Wait()
 	return nil
 }
