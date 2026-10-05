@@ -16,6 +16,7 @@ type bipTuner struct {
 	cwnd, threshold, credit         float64
 	lastCredit, recoveryUntil       time.Time
 	acked, samples, cuts, resets    uint64
+	hasCleanFeedback bool
 }
 
 type TunerSnapshot struct {
@@ -64,6 +65,7 @@ func (t *bipTuner) reset() {
 	t.credit = float64(t.burst())
 	t.lastCredit = time.Time{}
 	t.recoveryUntil = time.Time{}
+	t.hasCleanFeedback=false
 	t.resets++
 }
 func (t *bipTuner) window() int {
@@ -109,6 +111,7 @@ func (t *bipTuner) onAck(clean int, sample time.Duration, now time.Time) {
 	if !t.adaptive() || clean == 0 || sample <= 0 {
 		return
 	}
+	t.hasCleanFeedback=true
 	if t.srtt == 0 {
 		t.srtt = sample
 		t.variance = sample / 2
@@ -175,9 +178,15 @@ func (t *bipTuner) pathChanged() {
 	t.srtt = 0
 	t.variance = 0
 	t.rto = t.clampRTO(t.initialRTO)
-	// Preserve the previous slow-start threshold too. Setting it to cwnd
-	// here would turn an early PULL->FAST transition into slow additive
-	// growth at a tiny window even though no congestion was observed.
+	// A blocked bootstrap carrier can time out before the first usable DATA
+	// acknowledgement. Do not carry its tiny loss threshold into a newly
+	// authenticated working path and then crawl through additive recovery.
+	// After genuine DATA feedback, retain the learned congestion threshold.
+	if !t.hasCleanFeedback {
+		t.threshold=float64(t.maxWindow)
+	}
+	// Never set the threshold to the current flight merely because timing
+	// changed: that would invent a new congestion event at a tiny window.
 	t.credit = math.Min(t.credit, float64(t.burst()))
 	t.resets++
 }

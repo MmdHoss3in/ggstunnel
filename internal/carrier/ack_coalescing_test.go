@@ -21,7 +21,9 @@ func TestACKPiggybackRequiresActualTransmissionAndMatchingState(t *testing.T) {
 			b.active = 9
 			b.sessionKey = make([]byte, 32)
 			b.emit = func([]byte) error { return nil }
-			b.rxAck.max = 1
+			if !b.recordRXSeq(1) {
+				t.Fatal("initial test frame was rejected")
+			}
 			b.scheduleAck(wirePacket{typ: 8, id: 3, tuple: 7}, time.Now(), false)
 			packet, err := b.prepareWire(tc.typ, 3, 7, bipKindData, 0, 1, []byte("data"), 9)
 			if err != nil {

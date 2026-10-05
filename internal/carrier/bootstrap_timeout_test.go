@@ -32,15 +32,14 @@ func TestBIPHandshakeDeadlineAndTelemetry(t *testing.T) {
 }
 
 func TestBIPActorSignalsInitialHandshakeTimeout(t *testing.T) {
-	b := testBIP(t)
-	b.cfg.ApplyDefaults()
-	b.cfg.Transport.BIPHandshakeTimeoutSec = 1
-	b.startedAt = time.Now()
-	b.emit = func([]byte) error { return nil }
+	c:=simConfig("client")
+	c.Transport.BIPHandshakeTimeoutSec=1
+	b,err:=NewBIP(c)
+	if err!=nil{t.Fatal(err)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	done := make(chan struct{})
-	go func() { defer close(done); b.run(ctx) }()
+	if err:=b.StartPacketIO(ctx,silentBootstrapIO{});err!=nil{t.Fatal(err)}
+	defer b.Close()
 	select {
 	case err := <-b.Errors():
 		if !errors.Is(err, ErrBIPHandshakeTimeout) {
@@ -49,9 +48,16 @@ func TestBIPActorSignalsInitialHandshakeTimeout(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("bootstrap actor stuck indefinitely")
 	}
+	done := make(chan struct{})
+	go func() { defer close(done); b.Close() }()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("actor leaked")
 	}
 }
+
+type silentBootstrapIO struct{}
+func (silentBootstrapIO)Send([]byte)error{return nil}
+func (silentBootstrapIO)Receive(ctx context.Context)([]byte,error){<-ctx.Done();return nil,ctx.Err()}
+func (silentBootstrapIO)Close()error{return nil}

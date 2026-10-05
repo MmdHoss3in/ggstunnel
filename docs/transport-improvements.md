@@ -63,4 +63,3 @@ At 0.2% random loss, compact useful throughput in the third run was only 6.3..9.
 Before a new release: finish the asymmetric/stateful and application-accounting run, validate the latest receive-path optimization, apply the cloud gofmt patch, run the complete release matrix against the final source, and make the compact filter status explicit. Preserve exact source hashes and raw results. Keep legacy interoperability and rollback documented.
 
 Short cloud tests cannot establish 95% confidence for multiday Iran/foreign deployments without a sampling model and representative field data. A stable label must not imply those unperformed tests.
-
