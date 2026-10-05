@@ -28,7 +28,7 @@ func TestTunerNewCarrierDoesNotInheritBootstrapThreshold(t *testing.T) {
 		if x.window() != window+16 {
 			t.Fatal("working path inherited blocked bootstrap additive recovery")
 		}
-		x.onTimeout(now.Add(3*time.Second))
+		x.onTimeout(now.Add(3 * time.Second))
 		fastThreshold, window := x.threshold, x.window()
 		x.pathChangedTo(pendingModeRequest)
 		if x.threshold != bootstrapThreshold || x.window() != window {

@@ -25,6 +25,7 @@ jobs:
           mkdir -p formatting
           gofmt -w cmd internal
           git diff --binary -- cmd internal > formatting/gofmt.patch
+          cat formatting/gofmt.patch
       - uses: actions/upload-artifact@v4
         with:
           name: transport-source-formatting
