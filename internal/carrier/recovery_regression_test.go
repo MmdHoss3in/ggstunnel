@@ -69,6 +69,9 @@ func TestPathTransitionPreservesSlowStartAndLossThreshold(t *testing.T) {
 	if x.window() != 32 {
 		t.Fatal("initial growth was throttled")
 	}
+	// Establish capacity beyond the setup-ping/startup allowance before
+	// requiring an authenticated path change to preserve a loss threshold.
+	x.onAck(48, 80*time.Millisecond, now.Add(time.Second))
 	x.onTimeout(now)
 	window, threshold := x.window(), x.threshold
 	x.pathChanged()
