@@ -32,13 +32,18 @@ func TestBIPHandshakeDeadlineAndTelemetry(t *testing.T) {
 }
 
 func TestBIPActorSignalsInitialHandshakeTimeout(t *testing.T) {
-	c:=simConfig("client")
-	c.Transport.BIPHandshakeTimeoutSec=1
-	b,err:=NewBIP(c)
-	if err!=nil{t.Fatal(err)}
+	c := simConfig("client")
+	c.Transport.BIPHandshakeTimeoutSec = 1
+	transport, err := NewBIP(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := transport.(*BIP)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err:=b.StartPacketIO(ctx,silentBootstrapIO{});err!=nil{t.Fatal(err)}
+	if err := b.StartPacketIO(ctx, silentBootstrapIO{}); err != nil {
+		t.Fatal(err)
+	}
 	defer b.Close()
 	select {
 	case err := <-b.Errors():
@@ -58,6 +63,10 @@ func TestBIPActorSignalsInitialHandshakeTimeout(t *testing.T) {
 }
 
 type silentBootstrapIO struct{}
-func (silentBootstrapIO)Send([]byte)error{return nil}
-func (silentBootstrapIO)Receive(ctx context.Context)([]byte,error){<-ctx.Done();return nil,ctx.Err()}
-func (silentBootstrapIO)Close()error{return nil}
+
+func (silentBootstrapIO) Send([]byte) error { return nil }
+func (silentBootstrapIO) Receive(ctx context.Context) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (silentBootstrapIO) Close() error { return nil }

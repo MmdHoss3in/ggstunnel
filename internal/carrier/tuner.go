@@ -16,7 +16,7 @@ type bipTuner struct {
 	cwnd, threshold, credit         float64
 	lastCredit, recoveryUntil       time.Time
 	acked, samples, cuts, resets    uint64
-	hasCleanFeedback bool
+	hasCleanFeedback                bool
 }
 
 type TunerSnapshot struct {
@@ -65,7 +65,7 @@ func (t *bipTuner) reset() {
 	t.credit = float64(t.burst())
 	t.lastCredit = time.Time{}
 	t.recoveryUntil = time.Time{}
-	t.hasCleanFeedback=false
+	t.hasCleanFeedback = false
 	t.resets++
 }
 func (t *bipTuner) window() int {
@@ -111,7 +111,7 @@ func (t *bipTuner) onAck(clean int, sample time.Duration, now time.Time) {
 	if !t.adaptive() || clean == 0 || sample <= 0 {
 		return
 	}
-	t.hasCleanFeedback=true
+	t.hasCleanFeedback = true
 	if t.srtt == 0 {
 		t.srtt = sample
 		t.variance = sample / 2
@@ -183,7 +183,7 @@ func (t *bipTuner) pathChanged() {
 	// authenticated working path and then crawl through additive recovery.
 	// After genuine DATA feedback, retain the learned congestion threshold.
 	if !t.hasCleanFeedback {
-		t.threshold=float64(t.maxWindow)
+		t.threshold = float64(t.maxWindow)
 	}
 	// Never set the threshold to the current flight merely because timing
 	// changed: that would invent a new congestion event at a tiny window.

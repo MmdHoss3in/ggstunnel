@@ -13,16 +13,28 @@ func adaptiveTuner() *bipTuner {
 }
 
 func TestTunerNewPathRestoresStartupOnlyWithoutCleanFeedback(t *testing.T) {
-	for _,feedback:=range []bool{false,true} {
-		x:=adaptiveTuner();now:=time.Unix(100,0)
-		if feedback{x.onAck(16,80*time.Millisecond,now)}
-		x.onTimeout(now.Add(time.Second));threshold,window:=x.threshold,x.window()
+	for _, feedback := range []bool{false, true} {
+		x := adaptiveTuner()
+		now := time.Unix(100, 0)
+		if feedback {
+			x.onAck(16, 80*time.Millisecond, now)
+		}
+		x.onTimeout(now.Add(time.Second))
+		threshold, window := x.threshold, x.window()
 		x.pathChanged()
-		if x.window()!=window{t.Fatal("path transition changed flight budget")}
-		if feedback && x.threshold!=threshold{t.Fatal("lost learned congestion threshold")}
-		if !feedback && x.threshold!=float64(x.maxWindow){t.Fatal("failed bootstrap pinned additive recovery")}
-		x.onAck(16,80*time.Millisecond,now.Add(2*time.Second))
-		if !feedback && x.window()!=window+16{t.Fatal("new path did not resume bounded slow start")}
+		if x.window() != window {
+			t.Fatal("path transition changed flight budget")
+		}
+		if feedback && x.threshold != threshold {
+			t.Fatal("lost learned congestion threshold")
+		}
+		if !feedback && x.threshold != float64(x.maxWindow) {
+			t.Fatal("failed bootstrap pinned additive recovery")
+		}
+		x.onAck(16, 80*time.Millisecond, now.Add(2*time.Second))
+		if !feedback && x.window() != window+16 {
+			t.Fatal("new path did not resume bounded slow start")
+		}
 	}
 }
 func TestTunerDelayLossRecoveryAndBounds(t *testing.T) {
