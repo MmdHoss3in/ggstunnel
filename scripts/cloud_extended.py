@@ -194,6 +194,10 @@ class Pair:
         if hasattr(server, 'report_path'):
             receiver=json.loads(server.report_path.read_text())
             measured['receiver_intervals_mbps']=[i['sum']['bits_per_second']/1e6 for i in receiver['intervals'] if not i['sum'].get('omitted',False)]
+            # NIC counters include warmup. Read application interval bytes
+            # from the receiving endpoint using the same accounting scope.
+            receiving = data if data['start']['test_start'].get('reverse') else receiver
+            measured['application_received_bytes_all_intervals'] = sum(i['sum']['bytes'] for i in receiving['intervals'])
         return measured
 
     def probe_server(self):

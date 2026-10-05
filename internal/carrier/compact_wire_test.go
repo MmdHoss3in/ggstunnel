@@ -121,3 +121,25 @@ func TestCompactDoesNotDowngradeToLegacyPeer(t *testing.T){
 	select{case err:=<-a.Errors():if !errors.Is(err,ErrBIPHandshakeTimeout){t.Fatal(err)};case <-time.After(3*time.Second):t.Fatal("mixed wire modes hung forever")}
 	if a.PeerSession()!=0 || !a.compactMode(){t.Fatal("unauthenticated downgrade occurred")}
 }
+
+func FuzzCompactAuthenticatedBounds(f *testing.F){
+	f.Add([]byte{7,0,0,0,0,0,0,0,12,1,0})
+	f.Add([]byte{5,0,0,0,0,0,0,0,12,0})
+	f.Fuzz(func(t *testing.T,plain []byte){
+		if len(plain)>1444 {return}
+		a,b:=compactPair(t)
+		if err:=a.BindIdentity(11);err!=nil{t.Fatal(err)}
+		if err:=b.BindIdentity(12);err!=nil{t.Fatal(err)}
+		keys,err:=a.compactKeysFor(a.localID,a.localRole());if err!=nil{t.Fatal(err)}
+		// An isolated public test key deliberately admits arbitrary authenticated
+		// plaintext so fuzzing reaches the semantic parser after AEAD verification.
+		nonce:=compactNonce(keys.alias,1)
+		body:=make([]byte,compactPrefix,compactPrefix+len(plain)+16);body[0]=8;copy(body[8:20],nonce[:]);aad:=compactAAD(body,8,nonce)
+		body=keys.aead.Seal(body,nonce[:],plain,aad[:])
+		if len(body)<compactPrefix+16{return}
+		var mask [16]byte;keys.header.Encrypt(mask[:],body[compactPrefix:compactPrefix+16]);for i:=0;i<4;i++{body[16+i]^=mask[i]}
+		binary.BigEndian.PutUint16(body[2:4],checksum(body))
+		got,err:=b.decode(body)
+		if err==nil && got.kind==bipKindData && len(got.payload)>b.cfg.Performance.MaxFramePayload+60{t.Fatal("expanded payload exceeded configured bound")}
+	})
+}

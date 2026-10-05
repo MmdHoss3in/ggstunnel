@@ -34,9 +34,7 @@ jobs:
           go test -race ./internal/carrier ./internal/session -run 'Test(BIPHandshake|BIPActor|Reusable|UDPConcurrent|TCPShutdown|ACKPiggyback)' -count=10 -timeout 2m -v | tee transport-artifacts/regression.log
           go test -race ./internal/carrier ./internal/frame -run 'TestCompact' -count=3 -timeout 2m -v | tee transport-artifacts/compact.log
           go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactWireParser$' -fuzztime 10s
-          go test ./internal/frame -run '^$' -fuzz '^FuzzCompactFrameBounds$' -fuzztime 10s
-          go test -race ./internal/carrier ./internal/frame -run 'TestCompact' -count=3 -timeout 2m -v | tee transport-artifacts/compact.log
-          go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactWireParser$' -fuzztime 10s
+          go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactAuthenticatedBounds$' -fuzztime 10s
           go test ./internal/frame -run '^$' -fuzz '^FuzzCompactFrameBounds$' -fuzztime 10s
       - name: Build and manager checks
         run: |
@@ -47,11 +45,13 @@ jobs:
       - name: Native socket lifecycle
         run: |
           go test -race -c -o /tmp/ggs-carrier.test ./internal/carrier
-          sudo env GGS_KERNEL_TEST=1 /tmp/ggs-carrier.test -test.run '^(TestRawCarrierConcurrentStartClose|TestBIPRawLoopback)$' -test.v
+          sudo env GGS_KERNEL_TEST=1 /tmp/ggs-carrier.test -test.run '^(TestRawCarrierConcurrentStartClose|TestBIPRawLoopback|TestBIPCompactRawLoopback)$' -test.v
       - name: Real TUN payload and carrier comparison
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y iperf3 ethtool iptables
+          sudo apt-get install -y iperf3 ethtool iptables strace
+          strace -f -qq -e trace=sendmmsg -o transport-artifacts/udp-burst-syscalls.log /tmp/ggs-carrier.test -test.run '^TestUDPQueuedBurstKeepsDatagramBoundaries$' -test.v
+          python3 scripts/verify_batch_syscalls.py transport-artifacts/udp-burst-syscalls.log
           sudo env GITHUB_ACTIONS=true python3 scripts/transport_validation.py
       - uses: actions/upload-artifact@v4
         if: always()
