@@ -49,4 +49,26 @@ if (root/'transport-collected').exists():
         ratio=r.get('nic_to_application_ratio')
         if ratio is None or r.get('warmup_sec')!=0:raise SystemExit('Tagged application accounting missing')
         notes+=f"| {r['architecture']} | {r['wire']} | {r['payload']} | {'reverse' if r['reverse'] else 'forward'} | {r['received_mbps']} | {ratio} |\n"
+retry=[]
+loss=[]
+for path in sorted((root/'retry-collected').glob('*/extended-results/field-results.jsonl')):
+    retry.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
+for path in sorted((root/'retry-collected').glob('*/extended-results/results.jsonl')):
+    loss.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
+if (root/'retry-collected').exists():
+    expected={(arch,repeat) for arch in ('amd64','arm64') for repeat in range(20)}
+    if len(retry)!=40 or {(r['architecture'],r['repeat']) for r in retry}!=expected or any(r['status']!='pass' for r in retry):
+        raise SystemExit('Missing or failed tagged repeated asymmetric retry observations')
+    expected_loss={(arch,reverse,repeat) for arch in ('amd64','arm64') for reverse in (False,True) for repeat in range(3)}
+    if len(loss)!=12 or {(r['architecture'],r['reverse'],r['repeat']) for r in loss}!=expected_loss or any(r['status']!='pass' or r['loss']!='3%' for r in loss):
+        raise SystemExit('Missing or failed tagged repeated steady-loss observations')
+    notes+='\n## Repeated retry-budget regression\n\n'
+    notes+='40 fresh asymmetric 200Mbps/80ms observations (20 per architecture), using the original 100Mbps floor and zero internal-recovery requirement; plus 12 fresh 3% loss observations using the original 1Mbps/verified-progress gate. Earlier independent tag failures remain documented above. Passing these samples is not a multi-day or 100Mbps loss-path guarantee. Private metadata traces and per-case logs are retained in retry-validation-results.tar.gz.\n\n'
+    notes+='| Arch | Asymmetric Mbps min/max | 3% loss Mbps min/max |\n|---|---:|---:|\n'
+    for arch in ('amd64','arm64'):
+        speeds=[r['received_mbps'] for r in retry if r['architecture']==arch]
+        lossy=[r['received_mbps'] for r in loss if r['architecture']==arch]
+        notes+=f"| {arch} | {min(speeds):.3f} / {max(speeds):.3f} | {min(lossy):.3f} / {max(lossy):.3f} |\n"
+else:
+    raise SystemExit('Tagged repeated retry artifacts missing')
 (root/'artifacts/release-notes.md').write_text(notes)

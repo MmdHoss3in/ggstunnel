@@ -31,7 +31,7 @@ func (b *BIP) detectSACKLoss(delivered []ackDelivery, now time.Time) {
 		guard = max(guard, b.tuner.srtt/4)
 	}
 	for seq, p := range b.pending {
-		if p.fast || p.index < 0 {
+		if p.fast || p.index < 0 || !b.canAcceleratePending(p) {
 			continue
 		}
 		distance := sequenceDistance(base, seq)
@@ -49,8 +49,35 @@ func (b *BIP) detectSACKLoss(delivered []ackDelivery, now time.Time) {
 				}
 			}
 		}
+		reorderGrace := guard
 		if p.sacked < 3 {
-			continue
+			// A small flight may never provide three later frames. A clean
+			// later transmission supplies time-based evidence instead, with
+			// a longer settling interval. Retry ACKs are ambiguous (Karn),
+			// and old deliveries cannot accelerate a new attempt.
+			estimate := 200 * time.Millisecond
+			if b.tuner != nil {
+				estimate = b.tuner.srtt
+				if estimate <= 0 {
+					estimate = b.tuner.rto / 3
+				}
+			}
+			timed := false
+			for _, item := range delivered[i:] {
+				if item.retries == 0 && !item.sent.Before(p.sent) && now.Sub(item.sent) >= max(10*time.Millisecond, estimate/2) {
+					timed = true
+					break
+				}
+			}
+			if !timed {
+				continue
+			}
+			reorderGrace = max(2*guard, estimate/2)
+			if b.tuner != nil {
+				// Jitter receives a larger allowance, bounded by the measured
+				// RTT. Existing ordinary RTO remains the final backstop.
+				reorderGrace = min(max(reorderGrace, 2*b.tuner.variance), max(10*time.Millisecond, estimate))
+			}
 		}
 		// Leave a short reordering allowance. The actor's normal paced retry
 		// path handles the frame, congestion accounting and retry limits.
@@ -61,7 +88,7 @@ func (b *BIP) detectSACKLoss(delivered []ackDelivery, now time.Time) {
 		// Reordering is observed when SACK evidence arrives, usually an RTT
 		// after transmission. A send-time-only grace has already elapsed then
 		// and would turn a briefly reordered original into immediate loss.
-		deadline := maxTime(now.Add(guard), p.sent.Add(allowance))
+		deadline := maxTime(now.Add(reorderGrace), p.sent.Add(allowance))
 		if deadline.Before(p.deadline) {
 			p.deadline = deadline
 			p.fast = true
@@ -131,7 +158,7 @@ func (b *BIP) recoverPersistentHole(ack uint32, bits uint64, payload []byte, wid
 		if p == nil {
 			return
 		}
-		if p.item.retries == 0 || p.fast || p.index < 0 || now.Sub(p.sent) < guard || !seqAfter(seq, ack) || sequenceDistance(ack, seq) >= highest {
+		if p.item.retries == 0 || p.fast || p.index < 0 || !b.canAcceleratePending(p) || now.Sub(p.sent) < guard || !seqAfter(seq, ack) || sequenceDistance(ack, seq) >= highest {
 			return
 		}
 		p.sacked++
@@ -155,4 +182,13 @@ func (b *BIP) recoverPersistentHole(ack uint32, bits uint64, payload []byte, wid
 			visit(seq, p)
 		}
 	}
+}
+
+// SACKs returned over FAST/PULL prove a hole, but do not prove that an
+// EchoRequest retry can traverse the opposite direction. Keep ordinary
+// exponential backoff until a clean request delivery proves that carrier.
+// A peer PULL can still carry the retained frame immediately; a newly verified
+// FAST probe can still expedite it. Neither route resets the retry budget.
+func (b *BIP) canAcceleratePending(p *pendingData) bool {
+	return p.mode != pendingModeRequest || b.requestPathProven
 }

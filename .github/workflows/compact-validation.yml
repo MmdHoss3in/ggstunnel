@@ -54,6 +54,7 @@ jobs:
           go test -race -tags audit -short -count=1 -timeout 5m ./... | tee transport-artifacts/race.log
           go test -race ./internal/carrier ./internal/session -run 'Test(BIPHandshake|BIPActor|Reusable|UDPConcurrent|TCPShutdown|ACKPiggyback)' -count=10 -timeout 2m -v | tee transport-artifacts/regression.log
           go test -race ./internal/carrier ./internal/frame -run 'TestCompact' -count=3 -timeout 2m -v | tee transport-artifacts/compact.log
+          go test -race ./internal/carrier -run 'Test(FASTLostProbe|BlockedRequestSACK|RequestCarrierProof|DiagnosticLossTrace|TimedSACK)' -count=50 -timeout 2m -v | tee transport-artifacts/retry-path.log
           go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactWireParser$' -fuzztime 500000x -fuzzminimizetime 1000x -timeout 2m
           go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactAuthenticatedBounds$' -fuzztime 100000x -fuzzminimizetime 1000x -timeout 2m
           go test ./internal/frame -run '^$' -fuzz '^FuzzCompactFrameBounds$' -fuzztime 2000000x -fuzzminimizetime 1000x -timeout 2m

@@ -1,0 +1,55 @@
+name: BIP retry diagnosis
+on:
+  workflow_call:
+  push:
+    branches: [feature/compact-wire]
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  diagnose:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'pull_request' || contains(github.event.head_commit.message, '[retry-diagnosis]') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Build diagnostic source and retain formatting
+        run: |
+          mkdir -p retry-artifacts
+          gofmt -w cmd internal
+          git diff --binary -- cmd internal > retry-artifacts/gofmt.patch
+          cat retry-artifacts/gofmt.patch
+          go test -race -tags audit -short -count=1 -timeout 5m ./...
+          bash scripts/build-release.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool iptables
+      - name: Reproduce ARM asymmetric session exhaustion without changing gates
+        run: sudo env GITHUB_ACTIONS=true GGS_RETRY_TRACE=true GGS_RETRY_FOCUS=true GGS_FIELD_MODE=asymmetric GGS_FIELD_REPEATS=20 python3 scripts/field_performance.py
+      - name: Repeat 3 percent loss with the original useful-progress gate
+        if: always()
+        run: sudo env GITHUB_ACTIONS=true GGS_RETRY_TRACE=true GGS_FOCUS=true python3 scripts/cloud_extended.py steady-loss
+      - name: Summarize exhausted histories and make root-owned private traces uploadable
+        if: always()
+        run: |
+          sudo python3 scripts/analyze_retry_trace.py
+          # The runtime deliberately creates private diagnostic traces (0600).
+          # Transfer ownership to this disposable runner; do not make them public.
+          sudo chown -R "$(id -u):$(id -g)" extended-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retry-diagnosis-${{ matrix.runner }}
+          path: |
+            retry-artifacts/
+            extended-results/

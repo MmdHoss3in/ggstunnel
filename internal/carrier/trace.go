@@ -31,9 +31,10 @@ type traceEvent struct {
 }
 
 type bipTrace struct {
-	events  chan traceEvent
-	done    chan struct{}
-	dropped atomic.Uint64
+	events   chan traceEvent
+	done     chan struct{}
+	dropped  atomic.Uint64
+	lossOnly bool
 }
 
 func openBIPTrace(path string) (*bipTrace, error) {
@@ -41,7 +42,7 @@ func openBIPTrace(path string) (*bipTrace, error) {
 	if err != nil {
 		return nil, err
 	}
-	t := &bipTrace{events: make(chan traceEvent, 8192), done: make(chan struct{})}
+	t := &bipTrace{events: make(chan traceEvent, 8192), done: make(chan struct{}), lossOnly: os.Getenv("GGSTUNNEL_BIP_TRACE_LOSS_ONLY") == "1"}
 	go func() {
 		defer close(t.done)
 		defer f.Close()
@@ -84,6 +85,9 @@ func (t *bipTrace) close() {
 }
 func (b *BIP) traceRecord(e traceEvent) {
 	if b.trace == nil {
+		return
+	}
+	if b.trace.lossOnly && e.Event != "timeout" && e.Event != "delivery_exhausted" && !(e.Event == "pending" && e.Retries > 0) && !(e.Event == "ack_accept" && e.Retries > 0) {
 		return
 	}
 	e.At = e.At.UTC()

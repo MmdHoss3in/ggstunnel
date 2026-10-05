@@ -93,8 +93,9 @@ type wirePacket struct {
 }
 
 type ackDelivery struct {
-	seq  uint32
-	sent time.Time
+	seq     uint32
+	sent    time.Time
+	retries int
 }
 
 // The actor owns all handshake, path and delivery state.
@@ -137,6 +138,7 @@ type BIP struct {
 	tuning                                                                                           atomic.Pointer[TunerSnapshot]
 	lastTuning                                                                                       time.Time
 	tuningPath                                                                                       byte
+	requestPathProven                                                                                bool
 	txAckBase                                                                                        uint32
 	pullCredit, compatCredit                                                                         float64
 	lastTick                                                                                         time.Time
@@ -630,7 +632,7 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 		if p == nil {
 			return
 		}
-		delivered = append(delivered, ackDelivery{seq: seq, sent: p.sent})
+		delivered = append(delivered, ackDelivery{seq: seq, sent: p.sent, retries: p.item.retries})
 		b.traceRecord(traceEvent{At: now, Event: "ack_accept", Seq: seq, Ack: ack, Sack: bits, Mode: p.mode, Retries: p.item.retries, AgeMS: float64(now.Sub(p.sent)) / float64(time.Millisecond)})
 		fast = fast || p.mode == pendingModeFast
 		if b.tuner != nil {
@@ -641,6 +643,9 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 					oldest = p.sent
 				}
 			}
+		}
+		if p.mode == pendingModeRequest && p.item.retries == 0 {
+			b.requestPathProven = true
 		}
 		b.removePending(p)
 		delete(b.pending, seq)
@@ -820,6 +825,7 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.lossFlightSet = false
 	b.txAckBase = 0
 	b.nextPullRetryCheck = time.Time{}
+	b.requestPathProven = false
 	b.poll = pullPoller{}
 	b.replay = frame.NewReplayGuard(65536)
 	b.fastUntil = time.Time{}
@@ -1236,21 +1242,9 @@ func (b *BIP) run(ctx context.Context) {
 				_ = b.send(8, id, tuple, bipKindReady, 0, 0, b.packOfferPayload(), b.active)
 				b.lastPackOffer = now
 			}
-			if now.Sub(b.lastProbe) >= time.Duration(b.cfg.Transport.BIPFastProbeMS)*time.Millisecond && (b.fastToken == 0 || !now.Before(b.fastDeadline)) {
-				var r [4]byte
-				if _, err := rand.Read(r[:]); err != nil {
-					b.fail(err)
-					return
-				}
-				b.fastToken = binary.BigEndian.Uint32(r[:])
-				if b.fastToken == 0 {
-					b.fastToken = 1
-				}
-				b.fastDeadline = now.Add(time.Duration(b.cfg.Transport.BIPFastTTLMS) * time.Millisecond)
-				id, s := b.nextTuple()
-				_ = b.send(0, id, s, bipKindFastProbe, 0, b.fastToken, nil, b.active)
-				b.lastProbe = now
-				b.fastProbeTx.Add(1)
+			if err := b.maintainFASTProbe(now); err != nil {
+				b.fail(err)
+				return
 			}
 			fast := now.Before(b.fastUntil)
 			b.drainRX()
@@ -1331,6 +1325,8 @@ func (b *BIP) run(ctx context.Context) {
 					break
 				}
 				if pd.item.retries >= b.cfg.Transport.BIPMaxRetries {
+					b.traceRecord(traceEvent{At: now, Event: "delivery_exhausted", Seq: pd.item.seq, Ack: b.txAckBase, Mode: pd.mode, Retries: pd.item.retries, AgeMS: float64(now.Sub(pd.sent)) / float64(time.Millisecond), Pending: len(b.pending), Backlog: len(b.tx)})
+					log.Printf("BIP delivery exhausted seq=%d retries=%d mode=%d path=%d cumulative_ack=%d highest_sent=%d pending=%d last_attempt_age=%s", pd.item.seq, pd.item.retries, pd.mode, b.tuningPath, b.txAckBase, b.dataSeq, len(b.pending), now.Sub(pd.sent))
 					b.pendingExpired.Add(1)
 					b.fail(fmt.Errorf("%w at %d", ErrBIPDeliveryTimeout, pd.item.seq))
 					return

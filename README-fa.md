@@ -1,6 +1,8 @@
 # ggstunnel — تانل رمز‌شدهٔ ایران ↔ خارج
 
-نسخهٔ **v0.3.2** ارسال دسته‌ای TCP/UDP/raw، توقف صحیح workerها، بازیابی اتصال اولیه و شروع کنترل ازدحام در مسیر نامتقارن را بهبود می‌دهد. BIP با قالب legacy پیش‌فرض پایدار است؛ compact قابلیت آزمایشی و انتخابی است. انتشار Stable فقط پس از موفقیت تمام آزمون‌های سورس همان تگ انجام می‌شود. [اصلاحات و محدودیت‌ها](docs/transport-improvements.md) و [نتایج نسخهٔ تگ‌شده](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.2).
+نسخهٔ **v0.3.3** علاوه بر ارسال دسته‌ای TCP/UDP/raw و توقف صحیح workerها، retry روی مسیر Request تأییدنشده و تکرار probe گم‌شدهٔ FAST را اصلاح می‌کند. BIP با قالب legacy پیش‌فرض است؛ compact قابلیت آزمایشی و انتخابی است. انتشار Stable فقط پس از موفقیت تمام آزمون‌های سورس همان تگ انجام می‌شود. [اصلاحات و محدودیت‌ها](docs/transport-improvements.md) و [نتایج نسخهٔ تگ‌شده](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.3).
+
+تگ ۰٫۳٫۲ گیت‌های مستقل انتشار را پاس نکرد و Release قابل نصب ندارد؛ نسخهٔ جدید با حفظ نتایج شکست و معیارهای قبلی بررسی می‌شود.
 
 [![Linux validation](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml/badge.svg)](https://github.com/MmdHoss3in/ggstunnel/actions/workflows/ci.yml)
 
@@ -17,11 +19,11 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.2/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.3/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh install
 ```
 
-نصاب بستهٔ باینری و سورس را از [Release v0.3.2](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.2) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. تا پیش از انتشار موفق Release، این لینک‌ها برای نصب قابل استفاده نیستند.
+نصاب بستهٔ باینری و سورس را از [Release v0.3.3](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.3) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. تا پیش از انتشار موفق Release، این لینک‌ها برای نصب قابل استفاده نیستند.
 
 **برای دفعات بعد فقط منو را باز کنید؛ هیچ نصب، دانلود یا بررسی پیش‌نیازی انجام نمی‌شود:**
 
@@ -39,7 +41,7 @@ sudo bash setup.sh menu
 
 ### نصب دستی یا آفلاین
 
-فایل‌های `ggstunnel-linux.tar.gz` و `SHA256SUMS` را از [Release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.2) دانلود و کنار هم قرار دهید:
+فایل‌های `ggstunnel-linux.tar.gz` و `SHA256SUMS` را از [Release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.3) دانلود و کنار هم قرار دهید:
 
 ```bash
 sha256sum -c SHA256SUMS
@@ -117,7 +119,7 @@ sudo ggstunnel diagnose all
 ## ارتقا و بازگشت
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.2/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.3/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh update
 ```
 

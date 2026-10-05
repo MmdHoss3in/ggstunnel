@@ -52,3 +52,43 @@ func TestDiagnosticTraceNeverBlocksActor(t *testing.T) {
 		t.Fatal("trace drop unreported")
 	}
 }
+
+func TestDiagnosticLossTraceKeepsRecoveryAndExcludesNormalTraffic(t *testing.T) {
+	t.Setenv("GGSTUNNEL_BIP_TRACE_LOSS_ONLY", "1")
+	path := filepath.Join(t.TempDir(), "retry.jsonl")
+	tr, err := openBIPTrace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &BIP{localID: 7, trace: tr}
+	for _, event := range []traceEvent{
+		{Event: "wire_tx", Seq: 1},
+		{Event: "pending", Seq: 1},
+		{Event: "ack_accept", Seq: 1},
+		{Event: "pending", Seq: 2, Retries: 1},
+		{Event: "timeout", Seq: 2},
+		{Event: "ack_accept", Seq: 2, Retries: 1},
+		{Event: "delivery_exhausted", Seq: 3, Retries: 8},
+	} {
+		b.traceRecord(event)
+	}
+	tr.close()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("loss trace retained unexpected events: %s", data)
+	}
+	for _, line := range lines[:4] {
+		var event traceEvent
+		if json.Unmarshal([]byte(line), &event) != nil || event.Seq == 1 || event.Session != 7 {
+			t.Fatal("normal traffic leaked into loss trace or recovery metadata was lost")
+		}
+	}
+	info, _ := os.Stat(path)
+	if info.Mode().Perm() != 0600 {
+		t.Fatal("loss diagnostic lost private file permissions")
+	}
+}

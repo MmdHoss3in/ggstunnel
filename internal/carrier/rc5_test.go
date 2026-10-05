@@ -62,6 +62,9 @@ func TestWideSACKHighestSlotAndBoundedHorizon(t *testing.T) {
 
 func TestPersistentRetransmissionHoleRequiresFreshGuardedSnapshots(t *testing.T) {
 	b := testBIP(t)
+	// This test models an already proven request carrier. Separate regressions
+	// cover blocked request fallbacks and proof from actual clean DATA ACKs.
+	b.requestPathProven = true
 	b.tuner = adaptiveTuner()
 	b.tuner.srtt = 80 * time.Millisecond
 	now := time.Now()
