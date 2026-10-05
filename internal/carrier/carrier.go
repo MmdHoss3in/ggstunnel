@@ -44,6 +44,7 @@ type RuntimeStats struct {
 	RehandshakeTries  uint64 `json:"rehandshake_attempts"`
 	HandshakeWaitMS int64 `json:"handshake_wait_ms"`
 	ACKsCoalesced uint64 `json:"acks_coalesced"`
+	WireMode string `json:"wire_mode,omitempty"`
 
 	FastDataTx      uint64 `json:"fast_data_tx"`
 	PullDataTx      uint64 `json:"pull_data_tx"`

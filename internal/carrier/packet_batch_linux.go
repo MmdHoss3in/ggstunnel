@@ -158,7 +158,7 @@ func (b *BIP) readLoopBatch(ctx context.Context) error {
 				continue
 			}
 			body := packet[ihl:]
-			if len(body) < 72 || len(body) > 1480 || string(body[8:12]) != bipMagic {
+			if !b.acceptsWireBody(body) {
 				continue
 			}
 			packets = append(packets, append([]byte(nil), body...))

@@ -147,6 +147,7 @@ func (b *BIP) sendPullProbes(now time.Time, quota int) int {
 	for remaining := quota; remaining > 0; {
 		count := min(remaining, 64)
 		packets := make([][]byte, 0, count)
+		metadata := make([]wirePacket,0,count)
 		tuples := make([]uint32, 0, count)
 		for i := 0; i < count; i++ {
 			id, tuple := b.nextTuple()
@@ -155,6 +156,7 @@ func (b *BIP) sendPullProbes(now time.Time, quota int) int {
 				break
 			}
 			packets = append(packets, ip)
+			metadata = append(metadata,b.preparedWire)
 			tuples = append(tuples, pullTuple(id, tuple))
 		}
 		if len(packets) == 0 {
@@ -173,7 +175,7 @@ func (b *BIP) sendPullProbes(now time.Time, quota int) int {
 		}
 		n = max(0, min(n, len(packets)))
 		for i, packet := range packets {
-			b.recordWireResult(packet, i < n)
+			b.recordWireResult(packet, i < n, metadata[i])
 			if i < n {
 				b.poll.requests[tuples[i]] = now
 			}
