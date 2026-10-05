@@ -1,6 +1,17 @@
 # Release notes
 
-## v0.3.2 — transport IO and bounded startup recovery
+## v0.3.3 — preserve FAST health and useful retry budgets
+
+- Retry an unanswered FAST probe at its configured interval with the same live token, a fresh outer tuple/counter and an unchanged expiry. A single lost probe no longer delays the next attempt for an entire token lifetime and needlessly expires a usable FAST carrier. Expired or unauthenticated responses cannot promote a path.
+- Do not accelerate EchoRequest retries using SACKs received over another carrier until a clean request DATA acknowledgement has proved the request route. Keep ordinary backoff, peer-PULL delivery and authenticated FAST-return recovery, with unchanged retry budgets, sequence identities and memory bounds.
+- Retain separate per-case tunnel logs and optional private loss-only traces. Cloud export transfers trace ownership to the disposable runner while preserving runtime 0600 permissions.
+- Recover small SACK flights with guarded time-based evidence from a clean later transmission instead of requiring three later frames that may never arrive. Preserve a longer RTT/jitter-based settling interval, ambiguous-retry exclusions, request-route proof, duplicate-evidence filtering and ordinary RTO. This is a bounded BIP-specific mechanism inspired by [RFC 8985](https://www.rfc-editor.org/rfc/rfc8985.html), not a full TCP RACK-TLP implementation.
+
+The v0.3.2 tag failed its independent release gates and was not published: an ARM asymmetric 200Mbps observation measured 96.404Mbps with an internal recovery, and one 3% loss observation measured 0.943Mbps below the existing 1Mbps progress floor. The earlier successful PR run does not certify that tag. Diagnostic repeats reproduced unwanted recoveries on both architectures. Retained trace evidence showed FAST expiry followed by repeated blocked request retries (up to six attempts), then successful PULL/FAST delivery. No failed observations were removed or acceptance floors lowered.
+
+The compact scoped echo filter, native IO, installer/menu and per-carrier controller changes below are included. Legacy/1280 remains the default and compact remains experimental. Publication still requires all exact-tagged-source gates; this change does not solve global ordered-delivery throughput under persistent loss or certify multi-day WAN reliability.
+
+## v0.3.2 — unpublished candidate: transport IO and bounded startup recovery
 
 The `feature/compact-wire` branch adds bounded initial BIP authentication, correct carrier shutdown, queued TCP writev and native UDP/raw mmsg batching, successful-send ACK coalescing, an explicit encrypted compact BIP format and manager option 22/GGS3. IPIP is available in the manager. Legacy remains the default. See [transport-improvements.md](docs/transport-improvements.md) for exact-source observations and protocol details.
 

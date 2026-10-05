@@ -4,7 +4,9 @@ All compilation and runtime tests run in GitHub Actions. No Go/Python toolchain 
 
 The exact tag's required jobs are defined in [.github/workflows/ci.yml](.github/workflows/ci.yml) and the reusable [extended matrix](.github/workflows/extended.yml). A release is created only after all jobs succeed. The extended summary rejects missing observations, duplicate recovery trial numbers, boundary-package failures and recorded case failures. Development failures remain visible in Actions history.
 
-## v0.3.2 additions
+## v0.3.3 additions
+
+Independent tagged publication additionally requires 20 fresh asymmetric 200Mbps/80ms candidate trials on each architecture, with the original 100Mbps floor and zero internal recoveries, plus six 3% steady-loss trials per architecture with the original 1Mbps/verified-progress floor. The release job depends on these two additional jobs and validates all 40 unique asymmetric and 12 unique loss records before publication. Their per-case logs and private metadata traces are retained in `retry-validation-results.tar.gz`. The v0.3.2 tag failed independent gates and has no published release; earlier passing PR results do not override that failure.
 
 The final tagged source also requires the [native transport matrix](.github/workflows/compact-validation.yml): 46 observations on each architecture (92 total), covering all six carriers, legacy/compact payload 1280/1348, 200/500Mbps clean links, short loss, blocked EchoRequest direction and stateful ICMP replies. Clean BIP capacity floors are 100Mbps on 200Mbps links and 200Mbps on 500Mbps links. Lossy cases require connectivity only; they do not certify useful high throughput under loss. Separate zero-omit accounting checks require application receiver interval bytes to equal whole-transfer receiver bytes before comparing NIC totals.
 
@@ -29,7 +31,7 @@ Legacy BIP/1280 remains the default. Compact is experimental and does not instal
 | Lifecycle | 30 | Fresh start/stop and verified payload |
 | Boundaries | 50 repetitions of selected Go tests under race/audit | Sequence wrap, expiry, retry budget, retirement/key lifetime, wide SACK and shutdown |
 
-The 14-case shorter tagged binary test checks all carriers at 100Mbps/80ms and BIP at 0/0.2/1% loss, plus a three-second blackout, peer restart and manually configured outer MTU=1200. Native Ubuntu 22.04/amd64 and Ubuntu 24.04/arm64 tests install actual releases and exercise ON, active upgrade, unit/executable rollback, temporary STOP and OFF. All 21 menu dispatches and functional configuration/forward/installer/tuning regressions run separately; mocked dispatch coverage alone is not end-to-end coverage of every interactive input.
+The 14-case shorter tagged binary test checks all carriers at 100Mbps/80ms and BIP at 0/0.2/1% loss, plus a three-second blackout, peer restart and manually configured outer MTU=1200. Native Ubuntu 22.04/amd64 and Ubuntu 24.04/arm64 tests install actual releases and exercise ON, active upgrade, unit/executable rollback, temporary STOP and OFF. All 22 menu dispatches and functional configuration/forward/installer/tuning regressions run separately; mocked dispatch coverage alone is not end-to-end coverage of every interactive input.
 
 ## Harness and interpretation
 

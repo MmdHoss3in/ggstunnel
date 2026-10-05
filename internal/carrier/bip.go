@@ -95,6 +95,7 @@ type wirePacket struct {
 type ackDelivery struct {
 	seq  uint32
 	sent time.Time
+	retries int
 }
 
 // The actor owns all handshake, path and delivery state.
@@ -631,7 +632,7 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 		if p == nil {
 			return
 		}
-		delivered = append(delivered, ackDelivery{seq: seq, sent: p.sent})
+		delivered = append(delivered, ackDelivery{seq: seq, sent: p.sent, retries: p.item.retries})
 		b.traceRecord(traceEvent{At: now, Event: "ack_accept", Seq: seq, Ack: ack, Sack: bits, Mode: p.mode, Retries: p.item.retries, AgeMS: float64(now.Sub(p.sent)) / float64(time.Millisecond)})
 		fast = fast || p.mode == pendingModeFast
 		if b.tuner != nil {
