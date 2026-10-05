@@ -621,7 +621,7 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 		fast = fast || p.mode == pendingModeFast
 		if b.tuner != nil {
 			b.tuner.acked++
-			if p.item.retries == 0 && !p.sent.IsZero() {
+			if p.item.retries == 0 && !p.sent.IsZero() && (b.tuningPath == 0 || p.mode == b.tuningPath) {
 				clean++
 				if oldest.IsZero() || p.sent.Before(oldest) {
 					oldest = p.sent
@@ -1269,8 +1269,8 @@ func (b *BIP) run(ctx context.Context) {
 			} else if !b.needPullSince.IsZero() || remotePull {
 				path = 2
 			}
-			if path != 0 && b.tuningPath != 0 && path != b.tuningPath && b.tuner != nil {
-				b.tuner.pathChanged()
+			if path != 0 && b.tuner != nil {
+				b.tuner.pathChangedTo(path)
 			}
 			if path != 0 {
 				b.tuningPath = path

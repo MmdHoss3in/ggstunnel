@@ -21,10 +21,12 @@ def main():
     cases += [('bip',1348,200,d,'0%',wire,mode) for wire in ('legacy','compact') for mode in ('asymmetric','stateful') for d in (False,True)]
     if os.environ.get('GGS_TRANSPORT_FOCUS')=='compact-recovery':
         cases=[c for c in cases if c[5]=='compact' and (c[6]!='clean' or (c[1]==1348 and c[4]=='0%'))]
+    elif os.environ.get('GGS_TRANSPORT_FOCUS')=='startup-recovery':
+        cases=[c for c in cases if c[6] in ('asymmetric','stateful')]*3
     rows=[];failures=[]
-    for profile,payload,rate,reverse,loss,wire,mode in cases:
+    for trial,(profile,payload,rate,reverse,loss,wire,mode) in enumerate(cases,1):
         warmup=0 if mode=='accounting' else 2
-        row=dict(profile=profile,payload=payload,link_mbps=rate,reverse=reverse,loss=loss,wire=wire,case=mode,architecture=ARCH,base_rtt_ms=80,sample_sec=8,warmup_sec=warmup)
+        row=dict(profile=profile,payload=payload,link_mbps=rate,reverse=reverse,loss=loss,wire=wire,case=mode,trial=trial,architecture=ARCH,base_rtt_ms=80,sample_sec=8,warmup_sec=warmup)
         try:
             with Pair(profile) as pair:
                 for i in range(2):

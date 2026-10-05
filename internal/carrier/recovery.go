@@ -9,6 +9,11 @@ func (b *BIP) noteDeliveryLoss(p *pendingData, now time.Time) {
 	if b.tuner == nil || (b.lossFlightSet && !seqAfter(p.item.seq, b.lossFlightEnd)) {
 		return
 	}
+	// A retry from the old carrier is not congestion evidence for a newly
+	// authenticated path. It still consumes the ordinary retry/flight budgets.
+	if b.tuningPath != 0 && p.mode != b.tuningPath {
+		return
+	}
 	before := b.tuner.cuts
 	if p.fast {
 		b.tuner.onFastLoss(now)

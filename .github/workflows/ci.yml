@@ -7,6 +7,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
 concurrency:
   group: linux-validation-${{ github.ref }}
   cancel-in-progress: true
@@ -39,10 +42,12 @@ jobs:
         run: go test -race -tags audit -short -count=1 -timeout 5m ./...
       - name: Fuzz authenticated wire parsers and tuner
         run: |
-          go test ./internal/carrier -run '^$' -fuzz '^FuzzBIPWireParser$' -fuzztime 10s
-          go test ./internal/carrier -run '^$' -fuzz '^FuzzTunerEventBounds$' -fuzztime 10s
-          go test ./internal/carrier -run '^$' -fuzz '^FuzzPackedFrameBounds$' -fuzztime 10s
-          go test ./internal/frame -run '^$' -fuzz '^FuzzFrameParser$' -fuzztime 10s
+          # Iteration budgets avoid the fuzztime deadline race (golang/go#75804).
+          # A separate test timeout still fails hung targets; no errors are ignored.
+          go test ./internal/carrier -run '^$' -fuzz '^FuzzBIPWireParser$' -fuzztime 500000x -fuzzminimizetime 1000x -timeout 2m
+          go test ./internal/carrier -run '^$' -fuzz '^FuzzTunerEventBounds$' -fuzztime 50000x -fuzzminimizetime 1000x -timeout 2m
+          go test ./internal/carrier -run '^$' -fuzz '^FuzzPackedFrameBounds$' -fuzztime 500000x -fuzzminimizetime 1000x -timeout 2m
+          go test ./internal/frame -run '^$' -fuzz '^FuzzFrameParser$' -fuzztime 2000000x -fuzzminimizetime 1000x -timeout 2m
       - name: Build release binaries
         run: bash scripts/build-release.sh
       - name: Manager and installer tests

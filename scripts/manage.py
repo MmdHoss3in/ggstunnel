@@ -626,7 +626,7 @@ def configure_wire(name):
     print('Experimental compact mode requires the same mode on both updated peers; switching one side interrupts traffic.')
     print('Legacy 1348 requires outer MTU 1500. No automatic PMTU discovery. Default 1280 is safer.')
     print('The legacy kernel echo filter is not applicable to compact mode; actual overhead must be measured.')
-    print('Compact currently fails the strict stateful-path speed gate. Keep legacy for production until corrected.')
+    print('Compact is experimental. Measure path throughput and NIC/application overhead before production rollout.')
     mode=ask('Wire mode: legacy / compact',c['transport'].get('bip_wire_mode') or 'legacy')
     if mode not in ('legacy','compact'):raise ValueError('Unknown wire mode')
     payload=integer(ask('Payload and TUN MTU','1280'),576,1348)

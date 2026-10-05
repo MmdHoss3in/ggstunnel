@@ -1,8 +1,16 @@
-# 0.3.0 validation and known limits
+# Cloud validation and known limits
 
 All compilation and runtime tests run in GitHub Actions. No Go/Python toolchain or test packages are installed on the user's workstation. Local inspection and artifact hash verification do not execute the release binary.
 
 The exact tag's required jobs are defined in [.github/workflows/ci.yml](.github/workflows/ci.yml) and the reusable [extended matrix](.github/workflows/extended.yml). A release is created only after all jobs succeed. The extended summary rejects missing observations, duplicate recovery trial numbers, boundary-package failures and recorded case failures. Development failures remain visible in Actions history.
+
+## v0.3.2 additions
+
+The final tagged source also requires the [native transport matrix](.github/workflows/compact-validation.yml): 46 observations on each architecture (92 total), covering all six carriers, legacy/compact payload 1280/1348, 200/500Mbps clean links, short loss, blocked EchoRequest direction and stateful ICMP replies. Clean BIP capacity floors are 100Mbps on 200Mbps links and 200Mbps on 500Mbps links. Lossy cases require connectivity only; they do not certify useful high throughput under loss. Separate zero-omit accounting checks require application receiver interval bytes to equal whole-transfer receiver bytes before comparing NIC totals.
+
+All workflows use explicit Bash so pipeline failures propagate. Go fuzzing uses fixed iteration budgets and separate hang timeouts after a timed-fuzz coordinator deadline failure consistent with [golang/go#75804](https://github.com/golang/go/issues/75804). No failure is ignored or retried into a passing result. The final source must pass these updated gates. Earlier feature-branch aggregate successes concealed a test-fixture panic; the [transport report](docs/transport-improvements.md) withdraws those claims and records the corrected exact-source pass separately.
+
+Legacy BIP/1280 remains the default. Compact is experimental and does not install the legacy kernel echo filter. Quality, useful throughput and traffic cost are evaluated together; 15% application overhead is an optimization target, not a release claim or a reason to weaken authentication, ACKs or recovery. See tagged-release raw observations for measured overhead and exact source identity.
 
 ## Required observations
 

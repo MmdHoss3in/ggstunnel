@@ -53,9 +53,9 @@ jobs:
           go test -race -tags audit -short -count=1 -timeout 5m ./... | tee transport-artifacts/race.log
           go test -race ./internal/carrier ./internal/session -run 'Test(BIPHandshake|BIPActor|Reusable|UDPConcurrent|TCPShutdown|ACKPiggyback)' -count=10 -timeout 2m -v | tee transport-artifacts/regression.log
           go test -race ./internal/carrier ./internal/frame -run 'TestCompact' -count=3 -timeout 2m -v | tee transport-artifacts/compact.log
-          go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactWireParser$' -fuzztime 10s
-          go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactAuthenticatedBounds$' -fuzztime 10s
-          go test ./internal/frame -run '^$' -fuzz '^FuzzCompactFrameBounds$' -fuzztime 10s
+          go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactWireParser$' -fuzztime 500000x -fuzzminimizetime 1000x -timeout 2m
+          go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactAuthenticatedBounds$' -fuzztime 100000x -fuzzminimizetime 1000x -timeout 2m
+          go test ./internal/frame -run '^$' -fuzz '^FuzzCompactFrameBounds$' -fuzztime 2000000x -fuzzminimizetime 1000x -timeout 2m
       - name: Build and manager checks
         run: |
           bash scripts/build-release.sh
@@ -72,7 +72,7 @@ jobs:
           sudo apt-get install -y iperf3 ethtool iptables strace
           strace -f -qq -e trace=sendmmsg -o transport-artifacts/udp-burst-syscalls.log /tmp/ggs-carrier.test -test.run '^TestUDPQueuedBurstKeepsDatagramBoundaries$' -test.v
           python3 scripts/verify_batch_syscalls.py transport-artifacts/udp-burst-syscalls.log
-          sudo env GITHUB_ACTIONS=true GGS_TRANSPORT_FOCUS="${{ github.ref == 'refs/heads/feature/compact-wire' && contains(github.event.head_commit.message, '[compact-focus]') && 'compact-recovery' || '' }}" python3 scripts/transport_validation.py
+          sudo env GITHUB_ACTIONS=true GGS_TRANSPORT_FOCUS="${{ github.ref == 'refs/heads/feature/compact-wire' && contains(github.event.head_commit.message, '[startup-focus]') && 'startup-recovery' || github.ref == 'refs/heads/feature/compact-wire' && contains(github.event.head_commit.message, '[compact-focus]') && 'compact-recovery' || '' }}" python3 scripts/transport_validation.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

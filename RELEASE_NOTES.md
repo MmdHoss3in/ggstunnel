@@ -1,10 +1,22 @@
 # Release notes
 
-## Unreleased transport work
+## v0.3.2 — transport IO and bounded startup recovery
 
 The `feature/compact-wire` branch adds bounded initial BIP authentication, correct carrier shutdown, queued TCP writev and native UDP/raw mmsg batching, successful-send ACK coalescing, an explicit encrypted compact BIP format and manager option 22/GGS3. IPIP is available in the manager. Legacy remains the default. See [transport-improvements.md](docs/transport-improvements.md) for exact-source observations and protocol details.
 
-Compact currently fails the stricter stateful-path throughput gate. Its new kernel echo filter is not implemented or authorized yet. Clean-path speed measurements do not make it ready for stable deployment. No new release or 15% application-overhead guarantee is implied.
+Legacy BIP remains the stable default; compact is an explicitly experimental option requiring matching settings on both updated endpoints. The release is created only after every exact-tagged-source gate passes. See the tagged measurements appended below for the final source, rather than treating earlier branch runs as release certification.
+
+- Bound initial authentication waiting and recover with a fresh identity; reuse only live unconsumed challenges without extending their expiry.
+- Join carrier workers on close, reject sends after shutdown, and close TCP connections still waiting for authentication. Preserve TCP autotuning and use queued writev without a batching timer.
+- Use native Linux recvmmsg/sendmmsg for UDP and raw carriers on amd64/arm64, preserving datagram boundaries and retrying only the unsent suffix. Verify actual syscall batching and retain scalar fallbacks.
+- Coalesce current ACK/SACK only after a successful send, preserving stale, missing wide-SACK, failed and partial-send cases.
+- Learn loss thresholds separately for FAST, PULL and compat. A newly selected authenticated carrier keeps the current flight/credit and learns its own capacity; revisiting a carrier restores its congestion threshold. Old-path ACKs still release delivery state, and old-path timeouts still retry, but neither supplies RTT/growth/loss evidence for the new carrier. Expose path_mode and slow_start_threshold_frames in tuner telemetry.
+- Add explicit compact BIP with a smaller authenticated inner header and an encrypted outer envelope. Randomize ICMP tuples without allocating a new conntrack flow for every packet; retain counter exhaustion, replay and tamper guards. No silent format downgrade.
+- Add IPIP to the menu and option 22 for explicit wire mode and payload/TUN MTU. GGS3 carries compact settings; GGS2 legacy codes remain supported. Preserve stopped services and configuration rollback. Menu entry stays offline.
+
+Traffic cost is balanced with connection quality. Earlier corrected short accounting samples measured about 18–24% compact NIC/application overhead; final tagged observations appear below. This is not a universal billing multiplier or a 15% guarantee. The legacy echo filter does not apply to compact, and no new compact firewall rule is installed. Loss-sensitive ordered BIP delivery, automatic PMTU and multiday field certification remain limitations. Changing packet appearance cannot restore a generally blocked ICMP path.
+
+Upgrade both endpoints, foreign first then Iran. Existing legacy configurations remain compatible and keep their format. Options 16 and 21 are explicit; neither enables compact. Use option 22 on both sides only for an intentional compact trial, and retain payload 1280 unless the outer path MTU supports 1348. Short synthetic checks do not establish 95% multiday reliability.
 
 ## v0.3.1 — directional PULL feedback, native batching and negotiated packet packing
 
