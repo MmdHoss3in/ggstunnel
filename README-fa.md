@@ -1,6 +1,6 @@
 # ggstunnel — تانل رمز‌شدهٔ ایران ↔ خارج
 
-نسخهٔ **v0.3.3** علاوه بر ارسال دسته‌ای TCP/UDP/raw و توقف صحیح workerها، retry روی مسیر Request تأییدنشده و تکرار probe گم‌شدهٔ FAST را اصلاح می‌کند. BIP با قالب legacy پیش‌فرض است؛ compact قابلیت آزمایشی و انتخابی است. انتشار Stable فقط پس از موفقیت تمام آزمون‌های سورس همان تگ انجام می‌شود. [اصلاحات و محدودیت‌ها](docs/transport-improvements.md) و [نتایج نسخهٔ تگ‌شده](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.3).
+نسخهٔ **v0.3.4-rc1** نامزد اصلاح مسیر پاسخ کنترلی BIP است: وقتی EchoRequestهای یک جهت نمی‌رسند، FAST و ACK می‌توانند پاسخ احراز هویت‌شدهٔ EchoReply را امتحان کنند. PULL بی‌پاسخ نیز پس از بازهٔ انتظار به ۵ درخواست در ثانیه کاهش می‌یابد؛ این سقف سرعت DATA نیست. برای این اصلاح **هر دو سمت را ارتقا دهید**. [رفتار، سازگاری و محدودیت‌ها](docs/control-return-path.md). این نسخه آزمایشی است؛ انتشار بسته به موفقیت تمام آزمون‌های سورس همان تگ وابسته است و Stable بعد از تأیید میدانی بررسی می‌شود. BIP legacy و payload برابر 1280 پیش‌فرض‌اند؛ compact انتخابی و آزمایشی است.
 
 تگ ۰٫۳٫۲ گیت‌های مستقل انتشار را پاس نکرد و Release قابل نصب ندارد.
 
@@ -21,11 +21,11 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.3/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4-rc1/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh install
 ```
 
-نصاب بستهٔ باینری و سورس را از [Release v0.3.3](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.3) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند.
+پس از موفقیت آزمون‌ها، نصاب بستهٔ باینری و سورس را از [Release v0.3.4-rc1](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4-rc1) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند؛ تا پیش از انتشار موفق، نصب این نسخه در دسترس نیست. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. ابتدا خارج و سپس ایران را ارتقا دهید. برای اصلاح مسیر کنترل، اگر گزینه‌های ۱۶ و ۲۱ قبلاً اعمال شده‌اند، تکرارشان لازم نیست.
 
 **برای دفعات بعد فقط منو را باز کنید؛ هیچ نصب، دانلود یا بررسی پیش‌نیازی انجام نمی‌شود:**
 

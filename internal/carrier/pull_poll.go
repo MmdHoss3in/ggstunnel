@@ -76,7 +76,11 @@ func (b *BIP) pollingRate(now time.Time, active bool) float64 {
 			last := maxTime(p.activeSince, p.lastReply)
 			switch {
 			case now.Sub(last) >= grace:
-				p.rate = max(50, p.rate/2)
+				floor := float64(50)
+				if now.Sub(last) >= max(5*time.Second, 10*grace) {
+					floor = 5
+				}
+				p.rate = max(floor, p.rate/2)
 			case observed > 0:
 				p.rate = max(1000, observed*1.5)
 			}

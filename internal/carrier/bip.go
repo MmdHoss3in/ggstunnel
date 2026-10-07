@@ -193,6 +193,8 @@ type BIP struct {
 	fastRetries atomic.Uint64
 	rxBuffered  atomic.Uint64
 
+	controlReply controlReplyPath
+
 	peerSilenceMS               atomic.Int64
 	rehandshakeTries            atomic.Uint64
 	startedAt                   time.Time
@@ -832,6 +834,7 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.lastPeerActivity = time.Time{}
 	b.pathSuspended.Store(false)
 	b.fastToken = 0
+	b.controlReply.reset()
 	b.needPullSince = time.Time{}
 	b.remotePullUntil = time.Time{}
 	b.lastPull = time.Time{}
@@ -1035,14 +1038,17 @@ func (b *BIP) handle(body []byte, now time.Time) {
 	b.traceRecord(traceEvent{At: now, Event: "wire_rx", Seq: p.token, Ack: p.ack, Sack: p.sack, Kind: p.kind, Type: p.typ})
 	switch p.kind {
 	case bipKindFastProbe:
-		b.fastAckTx.Add(1)
-		_ = b.sendResponse(p, bipKindFastAck, 0, p.token, nil, b.active)
+		b.respondFASTProbe(p, now)
 	case bipKindFastAck:
 		if p.token != 0 && p.token == b.fastToken && now.Before(b.fastDeadline) {
 			if !now.Before(b.fastUntil) {
 				b.expeditePathRetries(now)
 			}
 			b.fastUntil = now.Add(time.Duration(b.cfg.Transport.BIPFastTTLMS) * time.Millisecond)
+			b.controlReply.preferReply = p.typ == 0
+			if p.typ == 0 {
+				b.controlReply.accepted.Add(1)
+			}
 			b.fastToken = 0
 			b.fastAckRx.Add(1)
 		}
@@ -1627,6 +1633,10 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 	b.ackMu.Lock()
 	pending := len(b.pending)
 	b.ackMu.Unlock()
+	wireMode := b.cfg.Transport.BIPWireMode
+	if wireMode == "" {
+		wireMode = "legacy"
+	}
 	return RuntimeStats{
 		PeerPacketPacking:     b.packetPacking.Load(),
 		PackedDataTx:          b.packedDataTx.Load(),
@@ -1648,7 +1658,9 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 		RehandshakeTries:      b.rehandshakeTries.Load(),
 		HandshakeWaitMS:       b.handshakeWaitMS.Load(),
 		ACKsCoalesced:         b.acksCoalesced.Load(),
-		WireMode:              b.cfg.Transport.BIPWireMode,
+		ReplyControlTx:        b.controlReply.sent.Load(),
+		ReplyControlRx:        b.controlReply.accepted.Load(),
+		WireMode:              wireMode,
 		PathSuspended:         b.pathSuspended.Load(),
 		FastRetransmits:       b.fastRetries.Load(),
 		ReorderBuffered:       b.rxBuffered.Load(),

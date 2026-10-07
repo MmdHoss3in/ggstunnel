@@ -31,7 +31,7 @@ func (b *BIP) coalesceAck(p wirePacket) {
 // remains usable through a stateful path. Flush every 16 frames or ACK interval.
 // Duplicates get an immediate ACK to recover a lost acknowledgement.
 func (b *BIP) scheduleAck(p wirePacket, now time.Time, immediate bool) {
-	b.ackType, b.ackID, b.ackTuple = responseType(p), p.id, p.tuple
+	b.ackType, b.ackID, b.ackTuple = b.ackReturnType(p, now), p.id, p.tuple
 	b.ackCount++
 	if b.ackDue.IsZero() {
 		b.ackDue = now.Add(time.Duration(b.cfg.Transport.BIPAckMS) * time.Millisecond)
@@ -42,10 +42,23 @@ func (b *BIP) scheduleAck(p wirePacket, now time.Time, immediate bool) {
 }
 
 func (b *BIP) flushAck(now time.Time) {
-	if b.ackType == 8 {
+	if b.ackType == 8 || b.controlReply.ackBackup {
 		b.ackID, b.ackTuple = b.nextTuple()
 	}
-	if err := b.send(b.ackType, b.ackID, b.ackTuple, bipKindAck, 0, 0, nil, b.active); err != nil {
+	err := b.send(b.ackType, b.ackID, b.ackTuple, bipKindAck, 0, 0, nil, b.active)
+	if b.controlReply.ackBackup {
+		if err == nil {
+			b.controlReply.sent.Add(1)
+		}
+		// Keep a request ACK as a safety net during a route transition. This
+		// adds control only; successful DATA piggyback still avoids both ACKs.
+		id, tuple := b.nextTuple()
+		backupErr := b.send(8, id, tuple, bipKindAck, 0, 0, nil, b.active)
+		if backupErr == nil {
+			err = nil
+		}
+	}
+	if err != nil {
 		b.ackDue = now.Add(time.Duration(b.cfg.Transport.BIPAckMS) * time.Millisecond)
 		return
 	}

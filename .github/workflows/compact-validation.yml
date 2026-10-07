@@ -51,10 +51,12 @@ jobs:
       - name: Static and race checks
         run: |
           go vet ./...
+          python3 -m py_compile scripts/control_path_validation.py scripts/render_release_notes.py
           go test -race -tags audit -short -count=1 -timeout 5m ./... | tee transport-artifacts/race.log
           go test -race ./internal/carrier ./internal/session -run 'Test(BIPHandshake|BIPActor|Reusable|UDPConcurrent|TCPShutdown|ACKPiggyback)' -count=10 -timeout 2m -v | tee transport-artifacts/regression.log
           go test -race ./internal/carrier ./internal/frame -run 'TestCompact' -count=3 -timeout 2m -v | tee transport-artifacts/compact.log
           go test -race ./internal/carrier -run 'Test(FASTLostProbe|BlockedRequestSACK|RequestCarrierProof|DiagnosticLossTrace|TimedSACK)' -count=50 -timeout 2m -v | tee transport-artifacts/retry-path.log
+          go test -race ./internal/carrier -run '^TestReplyControl' -count=10 -timeout 3m -v | tee transport-artifacts/reply-control.log
           go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactWireParser$' -fuzztime 500000x -fuzzminimizetime 1000x -timeout 2m
           go test ./internal/carrier -run '^$' -fuzz '^FuzzCompactAuthenticatedBounds$' -fuzztime 100000x -fuzzminimizetime 1000x -timeout 2m
           go test ./internal/frame -run '^$' -fuzz '^FuzzCompactFrameBounds$' -fuzztime 2000000x -fuzzminimizetime 1000x -timeout 2m
@@ -83,3 +85,30 @@ jobs:
           path: |
             transport-artifacts/
             extended-results/
+  captured-control-path:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Build exact source and check diagnostic harness
+        run: |
+          python3 -m py_compile scripts/control_path_validation.py
+          python3 scripts/check_version.py
+          bash scripts/build-release.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool iptables
+      - name: Captured ICMP control path and one-way UDP validation
+        run: sudo env GITHUB_ACTIONS=true python3 scripts/control_path_validation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: transport-validation-control-${{ matrix.runner }}
+          path: extended-results/

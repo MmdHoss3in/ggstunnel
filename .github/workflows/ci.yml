@@ -42,6 +42,7 @@ jobs:
           go vet ./...
           bash -n setup.sh install.sh scripts/build-release.sh
           python3 scripts/check_version.py
+          python3 -m py_compile scripts/control_path_validation.py scripts/render_release_notes.py
       - name: Race and audit tests
         run: go test -race -tags audit -short -count=1 -timeout 5m ./...
       - name: Fuzz authenticated wire parsers and tuner

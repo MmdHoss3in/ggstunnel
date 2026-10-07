@@ -1,5 +1,17 @@
 # Release notes
 
+## v0.3.4-rc1 — authenticated ICMP control return-path fallback
+
+This candidate addresses the captured failure where Iran-originated EchoRequest controls were visible at the source but absent at the foreign endpoint, while EchoReply DATA and probes continued to arrive. Upgrade both endpoints to obtain the new negotiated behavior. The capture evidence is specific to that path; it does not identify the filtering device or certify long-term capacity.
+
+- Retry an unanswered FAST probe with its original live token and deadline while asking for an authenticated EchoReply control response. Reuse the formerly ignored MORE bit on FAST_PROBE; old peers continue their existing response behavior. Retain the traditional response alongside the requested alternative. Only a fresh matching authenticated token can promote FAST; reflections, replay and expired responses cannot.
+- Return standalone DATA ACKs over the requested control path, keeping a traditional request ACK backup. One-way UDP does not depend on application return DATA to acknowledge delivery. Keep wide SACK, successful-send-only ACK coalescing, fresh packet counters, pacing and finite delivery retry budgets. Normal EchoRequest tuples remain paired for stateful paths; preferences expire and reset on authenticated identity changes.
+- Back off continuously unanswered active PULL discovery from 50pps to 5pps after at least five seconds and ten response-grace intervals. Keep periodic discovery and restore adaptive polling on authenticated correlated useful DATA. This does not set a DATA bandwidth limit.
+- Expose reply_control_tx, reply_control_rx and explicit legacy/compact wire mode in telemetry. No new sysctl, menu option, MTU increase or firewall rule is required. Existing installation, offline menu and options 16/21/22 remain compatible.
+- Add repeated race/security/one-way regressions and 64 exact-tagged native amd64/arm64 observations reproducing blocked directional EchoRequests, 100/200Mbps shaped paths, 94ms RTT, one-way TCP/UDP and small loss. Existing release gates are retained; publication requires every gate to succeed.
+
+This is a prerelease for field confirmation. Whole-tunnel ordered delivery remains loss-sensitive; the low-loss connectivity gate is not a 100–200Mbps loss-throughput guarantee. Compact stays optional and experimental, legacy/payload 1280 stay defaults, and existing v0.3.3 observations remain historical below. No local runtime tests were run; validation is performed on disposable Linux GitHub runners.
+
 ## v0.3.3 — preserve FAST health and useful retry budgets
 
 - Retry an unanswered FAST probe at its configured interval with the same live token, a fresh outer tuple/counter and an unchanged expiry. A single lost probe no longer delays the next attempt for an entire token lifetime and needlessly expires a usable FAST carrier. Expired or unauthenticated responses cannot promote a path.

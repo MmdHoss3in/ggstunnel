@@ -50,6 +50,18 @@ if (root/'transport-collected').exists():
         if ratio is None or r.get('warmup_sec')!=0:raise SystemExit('Tagged application accounting missing')
         notes+=f"| {r['architecture']} | {r['wire']} | {r['payload']} | {'reverse' if r['reverse'] else 'forward'} | {r['received_mbps']} | {ratio} |\n"
 retry=[]
+control=[]
+for path in sorted((root/'transport-collected').glob('*/extended-results/control-path-results.jsonl')):
+    control.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
+if (root/'transport-collected').exists():
+    expected={(arch,trial) for arch in ('amd64','arm64') for trial in range(32)}
+    if len(control)!=64 or {(r['architecture'],r['trial']) for r in control}!=expected or any(r['status']!='pass' for r in control):
+        raise SystemExit('Missing or failed captured directional control observations')
+    notes+='\n## Captured directional ICMP control path\n\n'
+    notes+='64 native amd64/arm64 observations: legacy/compact, all EchoRequests blocked in one direction, both blocked sides, 100/200Mbps links, 94ms RTT, one-way TCP and UDP, and 0.15%/1% loss. Clean TCP floors are half the shaped link rate; UDP sends 20Mbps and requires 15Mbps received. Loss cases retain a 1Mbps connectivity floor and do not certify high-throughput loss tolerance. Both FAST directions, authenticated alternative responses, unchanged processes and zero internal recoveries are required.\n\n'
+    notes+='| Arch | Wire | Blocked side | Link Mbps | Direction | Loss | UDP | Received Mbps |\n|---|---|---:|---:|---|---|---|---:|\n'
+    for r in control:
+        notes+=f"| {r['architecture']} | {r['wire']} | {r['blocked_request_side']} | {r['link_mbps']} | {'reverse' if r['reverse'] else 'forward'} | {r['loss']} | {r['udp']} | {r['received_mbps']} |\n"
 loss=[]
 for path in sorted((root/'retry-collected').glob('*/extended-results/field-results.jsonl')):
     retry.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
