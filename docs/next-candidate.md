@@ -1,7 +1,9 @@
 # v0.3.4-rc4 candidate: loss recovery and experimental carriers
 
-This is a release candidate. All changes require exact-source Linux amd64/arm64
-validation before publication. Short synthetic samples do not provide a 95%
+This is a published prerelease: exact-source Linux amd64/arm64 validation passed,
+and the unchanged archive was published after a report-layout repair. See the
+[release and retained validation history](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4-rc4).
+Short synthetic samples do not provide a 95%
 multi-day Iran/foreign reliability guarantee or prove resistance to DPI.
 
 ## BIP

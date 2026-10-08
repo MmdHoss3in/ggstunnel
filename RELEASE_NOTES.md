@@ -1,6 +1,23 @@
 # Release notes
 
-## v0.3.4-rc4 — candidate awaiting complete tagged validation
+## v0.3.4-rc4 — published prerelease with retained validation history
+
+Published [RC4](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4-rc4)
+uses the original validated archive from immutable source
+`5fa738b343000c6744a87fdae0c82a5967402f83`. All 46 validation jobs passed in
+[tagged attempt 2](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37821774549/attempts/2).
+One amd64 iperf accounting observation was retried once with unchanged criteria;
+the initial one-block reporting discrepancy remains documented in the release.
+The original publication job failed on a flattened artifact directory. A
+[publication-only repair](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37830715884)
+verified all existing gates and archive checksums, preserved observation counts,
+and published without rebuilding or changing runtime code.
+
+Ten-minute 500Mbps runs measured 400.774Mbps / 30MiB maximum RSS on amd64 and
+420.581Mbps / 26.723MiB on arm64. The longer 30-second 1% loss samples measured
+22.125–34.440Mbps; 3% measured 10.562–12.759Mbps. These limits and experimental
+opaque/raw/DCPI identity exhaustion prevent treating this as a Stable,
+multiday or DPI-resistance certification. Full raw reports are release assets.
 
 rc3 kept passing compilation, race/unit and ARM smoke checks, but the Ubuntu
 22.04 four-second compact startup sample still measured 75.568Mbps, below the
