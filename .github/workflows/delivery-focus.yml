@@ -1,0 +1,47 @@
+name: Focused delivery-controller diagnosis
+on:
+  push:
+    branches: [fix/bip-control-return]
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: delivery-focus-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  focused:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[delivery-focus]')
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Static review and repeated controller regressions
+        run: |
+          test -z "$(gofmt -l cmd internal)"
+          go vet ./...
+          python3 -m py_compile scripts/delivery_focus.py
+          python3 scripts/check_version.py
+          go test -race ./internal/carrier -run '^Test(Delivery|PullFeedbackAsymmetricContinuousTraffic)' -count=5 -timeout 3m -v
+          bash scripts/build-release.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool iptables
+      - name: Exact compact startup and kernel-filter gate
+        run: sudo env GITHUB_ACTIONS=true python3 scripts/smoke_echo_filter.py
+      - name: Established-flow reordering, capacity drop and loss
+        run: sudo env GITHUB_ACTIONS=true python3 scripts/delivery_focus.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: delivery-focus-${{ matrix.runner }}
+          path: extended-results/

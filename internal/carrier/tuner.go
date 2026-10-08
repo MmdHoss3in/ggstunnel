@@ -149,14 +149,10 @@ func (t *bipTuner) onAck(clean int, sample time.Duration, now time.Time) {
 		sparse := t.window() <= 2 && t.delivery.average > 0 && float64(t.delivery.flightBytes) <= 2*t.delivery.average
 		t.delivery.observeRTT(sample, now, sparse)
 		if !now.Before(t.recoveryUntil) && t.delivery.queueDelay(t.srtt) < t.queueBudget() && t.cwnd < t.threshold {
-			growth := t.cwnd + float64(clean)
-			if t.threshold >= float64(t.maxWindow) && t.workingDeliveryClock(now) && t.delivery.average > 0 {
-				// Clean startup may double, bounded by twice the measured BDP.
-				// Never shrink it merely because an epoch was application-limited.
-				ceiling := math.Max(t.cwnd, 2*t.delivery.rate*t.delivery.baseRTT.Seconds()/t.delivery.average)
-				growth = math.Min(growth, ceiling)
-			}
-			t.cwnd = math.Min(float64(t.maxWindow), growth)
+			// Fresh original ACKs grow clean startup; an idle/app-limited
+			// delivery-rate estimate is not evidence of a bandwidth ceiling.
+			// Growth remains bounded by real retained ACKs, flight and pacing.
+			t.cwnd = math.Min(float64(t.maxWindow), t.cwnd+float64(clean))
 		}
 		return
 	}

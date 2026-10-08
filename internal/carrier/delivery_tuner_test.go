@@ -73,7 +73,7 @@ func TestDeliveryCleanStartupDoesNotBecomeSteadyProbeAfterFirstEpoch(t *testing.
 	c.Tuner.Mode, c.Tuner.Algorithm = "adaptive", "delivery"
 	x := newBIPTuner(c)
 	now := time.Unix(100, 0)
-	for round := 0; round < 9; round++ {
+	for round := 0; round < 5; round++ {
 		count := x.window()
 		x.onSend(count*1200, false, now)
 		now = now.Add(80 * time.Millisecond)

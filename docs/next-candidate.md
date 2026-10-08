@@ -1,4 +1,4 @@
-# v0.3.4-rc3 candidate: loss recovery and experimental carriers
+# v0.3.4-rc4 candidate: loss recovery and experimental carriers
 
 This is a release candidate. All changes require exact-source Linux amd64/arm64
 validation before publication. Short synthetic samples do not provide a 95%
@@ -29,6 +29,10 @@ uses a confirmed robust lower RTT estimate, and requires fresh post-cut original
 timing before another queue reduction. Retry-only ACKs retain paced old-flight
 repair; a truly stalled clock still backs off. Verified sparse flight can
 recalibrate an obsolete baseline upward. Failed rc2 observations remain retained.
+
+rc3 also failed the short Ubuntu 22.04 startup gate. rc4 lets fresh authenticated
+original ACKs grow startup within flight/pacing bounds; idle delivery estimates
+do not clip that growth. Focused three-platform diagnosis runs before a new tag.
 
 ## Opaque and DCPI
 

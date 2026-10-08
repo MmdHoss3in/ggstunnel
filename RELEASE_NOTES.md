@@ -1,5 +1,18 @@
 # Release notes
 
+## v0.3.4-rc4 — candidate in focused validation
+
+rc3 kept passing compilation, race/unit and ARM smoke checks, but the Ubuntu
+22.04 four-second compact startup sample still measured 75.568Mbps, below the
+unchanged 100Mbps gate. It is not eligible for publication. rc4 removes startup
+BDP clipping from application-limited delivery estimates: authenticated original
+ACKs grow the window within the configured flight and pacing bounds, until fresh
+queue or repair evidence ends clean startup. All rc3 timing/queue fixes remain.
+
+A short three-platform diagnosis checks the exact cold compact gate, repeated
+controller tests, established-flow reordering, a 200-to-5Mbps step and 1/3% loss.
+It does not publish releases and cannot substitute for full exact-tagged gates.
+
 ## v0.3.4-rc3 — bounded startup and fresh timing for queue decisions
 
 rc2's first native amd64 observations measured 83–84Mbps at 1% loss and
