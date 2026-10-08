@@ -111,7 +111,7 @@ func (a *authenticatedCarrier) Send(b []byte) error {
 }
 func (a *authenticatedCarrier) SendContext(ctx context.Context, b []byte) error {
 	if a.PeerSession() != 0 {
-		return a.Send(b)
+		return a.sendReadyContext(ctx, b)
 	}
 	// A bounded wait keeps TUN pressure bounded while carrier-owned control
 	// traffic independently establishes the identity. Close always cancels it.
@@ -119,7 +119,7 @@ func (a *authenticatedCarrier) SendContext(ctx context.Context, b []byte) error 
 	defer tick.Stop()
 	for {
 		if a.PeerSession() != 0 {
-			return a.Send(b)
+			return a.sendReadyContext(ctx, b)
 		}
 		select {
 		case <-ctx.Done():
@@ -129,6 +129,23 @@ func (a *authenticatedCarrier) SendContext(ctx context.Context, b []byte) error 
 		case <-tick.C:
 		}
 	}
+}
+func (a *authenticatedCarrier) sendReadyContext(ctx context.Context, b []byte) error {
+	select {
+	case <-a.closed:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	// Preserve the underlying bounded queue's backpressure. Turning a full
+	// queue into a drop here would penalize challenge-mode data under load.
+	if sender, ok := a.inner.(interface {
+		SendContext(context.Context, []byte) error
+	}); ok {
+		return sender.SendContext(ctx, b)
+	}
+	return a.inner.Send(b)
 }
 func (a *authenticatedCarrier) Start(ctx context.Context) error {
 	a.mu.Lock()

@@ -207,3 +207,46 @@ func TestAuthenticatedChallengeBindsDataToGrantedReceiver(t *testing.T) {
 		t.Fatal("old receiver binding lost")
 	}
 }
+
+func TestAuthenticatedChallengePreservesBoundedQueueBackpressure(t *testing.T) {
+	cfg := simConfig("server")
+	cfg.Profile = "udp"
+	inner := NewUDP(cfg)
+	a, err := newAuthenticatedCarrier(cfg, inner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.peer.Store(222) // The send queue test begins after an authenticated grant.
+	for i := 0; i < cap(inner.tx); i++ {
+		if err := inner.Send([]byte("queued")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := make(chan error, 1)
+	go func() { done <- a.SendContext(context.Background(), []byte("next")) }()
+	select {
+	case err := <-done:
+		t.Fatal("full queue returned instead of applying backpressure", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	<-inner.tx
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("send did not resume after capacity returned")
+	}
+	go func() { done <- a.SendContext(context.Background(), []byte("closed wait")) }()
+	_ = a.Close()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrClosed) {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("close leaked a full-queue sender")
+	}
+}

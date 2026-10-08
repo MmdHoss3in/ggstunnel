@@ -62,6 +62,9 @@ func (r *rawCarrier) Send(b []byte) error {
 	return err
 }
 func (r *rawCarrier) SnapshotStats() RuntimeStats { return r.stats.snapshot() }
+func (r *rawCarrier) SendContext(ctx context.Context, b []byte) error {
+	return enqueueContext(ctx, r.closeCh, r.tx, b)
+}
 func (r *rawCarrier) Start(ctx context.Context) error {
 	r.startMu.Lock()
 	defer r.startMu.Unlock()

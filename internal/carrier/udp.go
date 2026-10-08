@@ -40,6 +40,9 @@ func (u *UDP) Send(b []byte) error {
 	return err
 }
 func (u *UDP) SnapshotStats() RuntimeStats { return u.stats.snapshot() }
+func (u *UDP) SendContext(ctx context.Context, b []byte) error {
+	return enqueueContext(ctx, u.closeCh, u.tx, b)
+}
 func (u *UDP) Start(ctx context.Context) error {
 	u.startMu.Lock()
 	defer u.startMu.Unlock()
