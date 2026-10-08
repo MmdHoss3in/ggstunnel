@@ -1,0 +1,88 @@
+name: Publish validated RC4 artifacts
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: publish-validated-rc4
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: publisher
+      - name: Verify all existing RC4 validation gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/MmdHoss3in/ggstunnel/actions/runs/37821774549 > run.json
+          gh api 'repos/MmdHoss3in/ggstunnel/actions/runs/37821774549/jobs?per_page=100' > jobs.json
+          python3 - <<'PY'
+          import json
+          run = json.load(open('run.json'))
+          jobs = json.load(open('jobs.json'))['jobs']
+          assert run['head_sha'] == '5fa738b343000c6744a87fdae0c82a5967402f83'
+          assert run['status'] == 'completed' and run['run_attempt'] == 2
+          gates = [j for j in jobs if j['name'] != 'release']
+          assert len(jobs) == 47 and len(gates) == 46
+          assert all(j['status'] == 'completed' and j['conclusion'] == 'success' for j in gates)
+          assert any(j['id'] == 113484785403 for j in gates)
+          print('All 46 validation jobs passed for the immutable RC4 source.')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.3.4-rc4
+          path: tested
+      - name: Verify tag and apply publication-only renderer repair
+        working-directory: tested
+        run: |
+          test "$(git rev-parse HEAD)" = '5fa738b343000c6744a87fdae0c82a5967402f83'
+          test "$(cat internal/version/VERSION)" = '0.3.4-rc4'
+          cp ../publisher/scripts/render_release_notes.py scripts/render_release_notes.py
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37821774549
+          name: ggstunnel-linux
+          path: tested/artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37821774549
+          name: extended-final-report
+          path: tested/artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37821774549
+          pattern: field-performance-*
+          path: tested/field-collected
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37821774549
+          pattern: transport-validation-*
+          path: tested/transport-collected
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37821774549
+          pattern: retry-diagnosis-*
+          path: tested/retry-collected
+      - name: Render strict evidence and publish unchanged tested archive
+        working-directory: tested
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd artifacts && sha256sum --check SHA256SUMS)
+          test "$(tar -xOf artifacts/ggstunnel-linux.tar.gz ggstunnel/internal/version/VERSION)" = '0.3.4-rc4'
+          GITHUB_SHA=5fa738b343000c6744a87fdae0c82a5967402f83 python3 scripts/render_release_notes.py
+          python3 ../publisher/scripts/rc4_publication_disclosure.py artifacts/release-notes.md
+          tar -czf artifacts/field-performance-results.tar.gz -C field-collected .
+          tar -czf artifacts/transport-validation-results.tar.gz -C transport-collected .
+          tar -czf artifacts/retry-validation-results.tar.gz -C retry-collected .
+          gh release create v0.3.4-rc4 artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl artifacts/recovery-results.jsonl artifacts/extended-summary.json artifacts/extended-report.md artifacts/field-performance-results.tar.gz artifacts/transport-validation-results.tar.gz artifacts/retry-validation-results.tar.gz --verify-tag --prerelease --title 'ggstunnel v0.3.4-rc4' --notes-file artifacts/release-notes.md

@@ -51,7 +51,11 @@ if (root/'transport-collected').exists():
         notes+=f"| {r['architecture']} | {r['wire']} | {r['payload']} | {'reverse' if r['reverse'] else 'forward'} | {r['received_mbps']} | {ratio} |\n"
 retry=[]
 control=[]
-for path in sorted((root/'transport-collected').glob('*/extended-results/control-path-results.jsonl')):
+# A single upload-artifact directory is flattened, whereas multi-directory
+# uploads retain extended-results/. Support both without accepting duplicates.
+control_paths = set((root/'transport-collected').glob('*/control-path-results.jsonl'))
+control_paths.update((root/'transport-collected').glob('*/extended-results/control-path-results.jsonl'))
+for path in sorted(control_paths):
     control.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
 if (root/'transport-collected').exists():
     expected={(arch,trial) for arch in ('amd64','arm64') for trial in range(32)}
