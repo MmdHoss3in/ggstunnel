@@ -4,7 +4,10 @@ Baseline: published v0.3.4-rc4, runtime source 5fa738b.
 Status: runtime/manager changes implemented; focused native run 37853656027 passed
 all four jobs on amd64/arm64. Final manager-only REPLACE preservation checks and
 50 repeated race runs of nine encrypted peers passed in run 37855689206.
-The full exact-tag release pipeline remains. No statistical improvement claim.
+The full exact-tag pipeline completed with all 51 jobs successful in attempt 2.
+RC5 is published as a prerelease. Two initial speed-comparison failures and the
+one bounded confirmation after independent A/A controls remain documented in
+[the validation history](rc5-validation-history.md). No statistical improvement claim.
 
 1. Explicit authenticated generic lifecycle for opaque carriers. Fresh receiver
    challenges bind sender/receiver identities, roles, carrier and version. Keep

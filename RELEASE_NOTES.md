@@ -2,6 +2,22 @@
 
 ## v0.3.4-rc5 — prerelease candidate with challenge-bound sessions
 
+Published from immutable source `aab18976517393dc87a1437eceaca63169ccee66` after
+all 51 jobs succeeded in [tagged attempt 2](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37856122779/attempts/2).
+Attempt 1 failed two individual loss-rate comparisons; independent RC4 self-controls
+showed up to 17.6% variation. Exactly one confirmation retained the original
+source and thresholds. [Full failure/confirmation history](docs/rc5-validation-history.md)
+and `rc5-validation-history.zip` preserve those observations. Passing the second
+attempt does not prove statistical nonregression or multiday stability.
+
+The exact-tag 10-minute 500Mbps BIP case on amd64 delivered 403.446Mbps, with
+31.832MiB maximum RSS, zero kernel TUN drops and no late speed decline. Six
+challenge carriers on both architectures delivered clean TCP 157.601–181.732Mbps
+on 200Mbps/80ms paths, with ten alternating peer restarts each (maximum 2.483s).
+Candidate loss A/B measured 104.084–148.932Mbps at 1% and 48.347–51.730Mbps at 3%;
+120-second 3% cases delivered 49.389/49.398Mbps. Outer TCP at 0.15% loss measured
+only 3.670–7.537Mbps. These are synthetic observations, not universal rate promises.
+
 Explicit opaque challenge lifecycle (GGS5) binds data keys to sender AND receiver
 identities; GGS4/v1 remains unchanged. Add UDP/raw socket counters, accurate
 generic peer health and option 25 for reversible transport changes preserving

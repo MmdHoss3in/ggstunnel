@@ -1,8 +1,8 @@
 # RC5 challenge mode and transport changes
 
-Prerelease candidate; the downloadable package is published only after full CI.
-Final tagged measurements are attached to that release; preflight history is in
-the release notes.
+Published prerelease [v0.3.4-rc5](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4-rc5).
+Final tagged measurements and retained initial failures are attached to the release;
+[validation history](rc5-validation-history.md) records the bounded confirmation.
 RC4/GGS4 remains the previously published opaque v1 format. Upgrading a binary
 does not silently change existing configurations. No DPI or multiday guarantee.
 
