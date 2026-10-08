@@ -146,9 +146,17 @@ func (t *bipTuner) onAck(clean int, sample time.Duration, now time.Time) {
 	// instead of an 82ms timeout on a measured ~80ms Internet path.
 	t.rto = t.clampRTO(max(2*t.srtt, t.srtt+max(25*time.Millisecond, 4*t.variance)))
 	if t.cfg.Algorithm == "delivery" {
-		t.delivery.observeRTT(sample, now)
+		sparse := t.window() <= 2 && t.delivery.average > 0 && float64(t.delivery.flightBytes) <= 2*t.delivery.average
+		t.delivery.observeRTT(sample, now, sparse)
 		if !now.Before(t.recoveryUntil) && t.delivery.queueDelay(t.srtt) < t.queueBudget() && t.cwnd < t.threshold {
-			t.cwnd = math.Min(float64(t.maxWindow), t.cwnd+float64(clean))
+			growth := t.cwnd + float64(clean)
+			if t.threshold >= float64(t.maxWindow) && t.workingDeliveryClock(now) && t.delivery.average > 0 {
+				// Clean startup may double, bounded by twice the measured BDP.
+				// Never shrink it merely because an epoch was application-limited.
+				ceiling := math.Max(t.cwnd, 2*t.delivery.rate*t.delivery.baseRTT.Seconds()/t.delivery.average)
+				growth = math.Min(growth, ceiling)
+			}
+			t.cwnd = math.Min(float64(t.maxWindow), growth)
 		}
 		return
 	}
@@ -173,6 +181,7 @@ func (t *bipTuner) onTimeout(now time.Time) {
 		// An isolated timer expiration with continuing delivery is not a
 		// stalled path. Repair still consumes pacing/retry/flight budgets.
 		t.delivery.repairs++
+		t.finishDeliveryStartup()
 		return
 	}
 	t.threshold = math.Max(1, t.cwnd/2)
@@ -191,6 +200,7 @@ func (t *bipTuner) onFastLoss(now time.Time) {
 	}
 	if t.workingDeliveryClock(now) {
 		t.delivery.repairs++
+		t.finishDeliveryStartup()
 		return
 	}
 	t.threshold = math.Max(1, t.cwnd*0.8)

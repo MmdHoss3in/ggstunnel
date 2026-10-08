@@ -10,23 +10,13 @@ import (
 // Rate epochs span at least one measured RTT. This bounds short ACK bursts,
 // but is not a full per-packet delivery-rate sampler. Peaks expire in eight epochs.
 type deliveryController struct {
+	rtt                                  deliveryRTT
 	baseRTT                              time.Duration
 	epoch, lastProgress, lastAdjust      time.Time
 	bytes, packets, flightBytes, repairs uint64
 	average, rate                        float64
 	peaks                                [8]float64
 	round                                int
-}
-
-func (d *deliveryController) observeRTT(sample time.Duration, now time.Time) {
-	if sample <= 0 {
-		return
-	}
-	// Do not normalize persistent queue into the baseline. An authenticated
-	// carrier path transition explicitly resets timing in resetPath.
-	if d.baseRTT == 0 || sample < d.baseRTT {
-		d.baseRTT = sample
-	}
 }
 
 func (d *deliveryController) queueDelay(srtt time.Duration) time.Duration {
@@ -58,8 +48,19 @@ func (t *bipTuner) onSend(size int, retry bool, now time.Time) {
 func (t *bipTuner) workingDeliveryClock(now time.Time) bool {
 	d := &t.delivery
 	return t.cfg.Algorithm == "delivery" && d.rate > 0 &&
-		!d.lastProgress.IsZero() && now.Sub(d.lastProgress) <= max(t.srtt, d.baseRTT)*2 &&
-		d.queueDelay(t.srtt) < t.queueBudget()
+		!d.lastProgress.IsZero() && now.Sub(d.lastProgress) <= max(t.srtt, d.baseRTT)*2
+}
+
+func (t *bipTuner) finishDeliveryStartup() {
+	d := &t.delivery
+	if t.threshold < float64(t.maxWindow) || d.average <= 0 || d.rate <= 0 {
+		return
+	}
+	// A policer may drop packets without building a queue. Exit clean startup
+	// on repair evidence instead of growing indefinitely against that policer.
+	t.threshold = math.Min(float64(t.maxWindow), math.Max(1, 1.5*d.rate*d.baseRTT.Seconds()/d.average))
+	t.cwnd = math.Min(t.cwnd, t.threshold)
+	t.credit = math.Min(t.credit, float64(t.burst()))
 }
 
 func (t *bipTuner) onDelivered(bytes, packets int, backlogged bool, now time.Time) {
@@ -98,13 +99,24 @@ func (t *bipTuner) onDelivered(bytes, packets int, backlogged bool, now time.Tim
 	}
 	bdp := d.rate * d.baseRTT.Seconds() / d.average
 	if d.queueDelay(t.srtt) >= t.queueBudget() {
+		// Pre-cut originals and retry-only ACKs describe the old flight.
+		// Keep its bounded repair pacing until fresh clean timing is available.
+		if !d.rtt.cleanSent.After(d.rtt.lastQueueCut) {
+			return
+		}
 		// Persistent queue is capacity evidence even when every packet arrives.
 		// Reduce once per measured RTT, bounded by learned delivery and flight.
 		t.cwnd = math.Max(1, math.Min(t.cwnd*0.85, bdp*1.5))
 		t.threshold = t.cwnd
 		t.credit = math.Min(t.credit, float64(t.burst()))
 		t.cuts++
+		d.rtt.lastQueueCut = now
 	} else if backlogged {
+		if t.threshold >= float64(t.maxWindow) {
+			// The first ACK epoch is not a capacity ceiling. Let clean ACKs
+			// finish bounded startup until queue or repair supplies evidence.
+			return
+		}
 		// Probe from observed delivery and current capacity, never a fixed
 		// hundreds-of-packets floor. Application-limited ACKs do not probe.
 		target := math.Min(math.Max(1, bdp*1.5), t.cwnd*1.25)

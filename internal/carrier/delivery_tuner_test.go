@@ -61,9 +61,30 @@ func TestDeliveryControllerIdleAndDuplicateACKCannotProbe(t *testing.T) {
 func TestDeliveryBaselineDoesNotNormalizePersistentQueue(t *testing.T) {
 	d := deliveryController{}
 	now := time.Unix(100, 0)
-	d.observeRTT(80*time.Millisecond, now)
-	d.observeRTT(150*time.Millisecond, now.Add(time.Hour))
+	d.observeRTT(80*time.Millisecond, now, false)
+	d.observeRTT(150*time.Millisecond, now.Add(time.Hour), false)
 	if d.baseRTT != 80*time.Millisecond || d.queueDelay(150*time.Millisecond) != 70*time.Millisecond {
 		t.Fatal("persistent queue became the base RTT")
+	}
+}
+
+func TestDeliveryCleanStartupDoesNotBecomeSteadyProbeAfterFirstEpoch(t *testing.T) {
+	c := simConfig("server")
+	c.Tuner.Mode, c.Tuner.Algorithm = "adaptive", "delivery"
+	x := newBIPTuner(c)
+	now := time.Unix(100, 0)
+	for round := 0; round < 9; round++ {
+		count := x.window()
+		x.onSend(count*1200, false, now)
+		now = now.Add(80 * time.Millisecond)
+		x.onAck(count, 80*time.Millisecond, now)
+		x.onDelivered(count*1200, count, true, now)
+	}
+	if x.window() != x.maxWindow || x.cuts != 0 {
+		t.Fatal("clean startup was throttled by first delivery epoch", x.snapshot())
+	}
+	x.onFastLoss(now)
+	if x.threshold >= float64(x.maxWindow) {
+		t.Fatal("repair did not exit clean startup")
 	}
 }

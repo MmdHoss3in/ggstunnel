@@ -1,5 +1,29 @@
 # Release notes
 
+## v0.3.4-rc3 — bounded startup and fresh timing for queue decisions
+
+rc2's first native amd64 observations measured 83–84Mbps at 1% loss and
+34–50Mbps at 3% loss versus about 2Mbps and 0.3–1.5Mbps with the old recipe.
+The 500Mbps ten-minute amd64 case measured 375.806Mbps and 31.43MiB maximum RSS.
+These gains did not qualify rc2 for publication: short compact startup samples
+fell below 100Mbps, and sustained reordering/capacity-step cases stalled.
+
+- Keep clean startup until queue or repair evidence instead of turning its
+  first delivery epoch into a permanent capacity ceiling. Bound clean growth
+  by measured BDP; exit startup on loss/policer evidence.
+- Estimate lower RTT from a confirmed rolling median so transient accelerated
+  or reordered ACKs cannot poison an 80ms path with a sub-ms baseline. Permit
+  upward recalibration only after a verified sparse flight, never aging alone.
+- Queue cuts require clean original sends after the previous cut. Retry-only
+  and pre-cut ACKs cannot repeatedly collapse the old flight's repair pacing.
+  A still-working delivery clock repairs loss even with queue delay; fresh queue
+  evidence controls backoff separately, and a genuinely stalled clock backs off.
+- Add focused regression tests for these failure patterns. Keep all cloud gates
+  and original thresholds; preserve the failed rc2 tag/run rather than rerunning
+  it selectively or moving its tag. Every rc3 observation must use rc3 source.
+
+This remains a candidate with the experimental carrier limitations below.
+
 ## v0.3.4-rc2 — loss-path candidate and experimental opaque/DCPI
 
 The previous rc1 run passed the captured directional control checks but failed

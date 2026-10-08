@@ -1,4 +1,4 @@
-# v0.3.4-rc2 candidate: loss recovery and experimental carriers
+# v0.3.4-rc3 candidate: loss recovery and experimental carriers
 
 This is a release candidate. All changes require exact-source Linux amd64/arm64
 validation before publication. Short synthetic samples do not provide a 95%
@@ -22,6 +22,13 @@ experimental controller, not BBR; ACK compression is not fully modeled.
 `tuner.algorithm="loss"` retains the previous controller for rollback. Explicit
 PPS limits still work; `unlimited_rate=true` removes the configured PPS ceiling,
 and retains congestion pacing. It is not an unlimited-throughput guarantee.
+
+rc2 improved short native amd64 loss throughput but failed compact startup and
+transient reordering/capacity-step gates. rc3 repairs premature startup exit,
+uses a confirmed robust lower RTT estimate, and requires fresh post-cut original
+timing before another queue reduction. Retry-only ACKs retain paced old-flight
+repair; a truly stalled clock still backs off. Verified sparse flight can
+recalibrate an obsolete baseline upward. Failed rc2 observations remain retained.
 
 ## Opaque and DCPI
 
