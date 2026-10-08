@@ -34,7 +34,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import subprocess
-          allowed={'scripts/manage.py','scripts/test_transport_change.py','docs/rc5-upgrade.md','.github/workflows/rc5-focus.yml'}
+          allowed={'scripts/manage.py','scripts/test_transport_change.py','docs/rc5-upgrade.md','.github/workflows/rc5-focus.yml','internal/engine/multipeer_test.go'}
           changed=set(subprocess.check_output(['git','diff','--name-only','HEAD^','HEAD'],text=True).splitlines())
           if not changed or not changed<=allowed:raise SystemExit('Manager-only label includes unrelated source changes')
           print('Only manager/docs changed; prior native observations are retained. Tags always rerun every gate.')
@@ -47,6 +47,7 @@ jobs:
           python3 scripts/check_version.py
           go test -race -tags audit -short -count=1 -timeout 5m ./...
           go test -race ./internal/carrier ./internal/frame ./internal/engine -run '^Test(AuthenticatedChallenge|BoundOpaque|Delivery|Recovery)' -count=5 -timeout 4m -v
+          go test -race ./internal/engine -run '^TestNineEncryptedPeers$' -count=50 -timeout 4m
           bash scripts/build-release.sh
           python3 -m unittest discover -s scripts -p 'test_*.py' -v
       - name: Native focused lifecycle or sustained-loss A/B
