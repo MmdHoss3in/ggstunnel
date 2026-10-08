@@ -19,8 +19,9 @@ def record(row):
 
 
 def lifecycle():
+    failures=0
     for profile in ('tcp','udp','icmp','gre','ipip','dcpi'):
-        row=dict(kind='rc5-lifecycle',profile=profile,status='fail')
+        row=dict(kind='rc5-lifecycle',profile=profile,status='fail',restart_loss='0.15%',capacity_loss='0%')
         try:
             with Pair(profile,label='rc5-'+profile+'-') as pair:
                 for i in range(2):
@@ -28,22 +29,33 @@ def lifecycle():
                     cfg['transport'].update(wire_mode='opaque',opaque_session='challenge')
                     path.write_text(json.dumps(cfg))
                 pair.shape(200,80,'0.15%');pair.restart()
-                recoveries=[]
+                recoveries=[];row['restart_recovery_sec']=recoveries
                 for trial in range(10):
                     side=trial%2; other=1-side; old_other=pair.pid(other)
                     pair.stop_peer(side);pair.start_peer(side)
                     recoveries.append(pair.reachable(20))
                     if pair.pid(other)!=old_other:raise RuntimeError('Untouched peer unexpectedly restarted')
-                speeds=[]
+                # The original opaque 30Mbps floor is a CLEAN-path gate. A
+                # single outer TCP flow over loss is not equivalent to it.
+                # Keep restarts impaired, restore the exact clean recipe for
+                # capacity, then retain separate impaired TCP observations.
+                pair.shape(200,80,'0%')
+                speeds=[];row['speeds']=speeds
                 for reverse in (False,True):
                     result=pair.finish_iperf(*pair.iperf('10.77.1.2',8,2,reverse,4),35)
                     speeds.append(result)
                     if result['received_mbps']<30:raise RuntimeError('Challenge carrier capacity below original opaque floor')
-                udp_speeds=[]
+                udp_speeds=[];row['udp_speeds']=udp_speeds
                 for reverse in (False,True):
                     result=pair.finish_iperf(*pair.iperf('10.77.1.2',6,2,reverse,1,udp=True),30)
                     udp_speeds.append(result)
                     if result['received_mbps']<15 or (result.get('lost_percent') or 0)>1:raise RuntimeError('Inner UDP throughput/loss gate failed')
+                pair.shape(200,80,'0.15%')
+                impaired=[];row['impaired_speeds']=impaired
+                for reverse in (False,True):
+                    result=pair.finish_iperf(*pair.iperf('10.77.1.2',8,2,reverse,4),35)
+                    impaired.append(result)
+                    if result['received_mbps']<1:raise RuntimeError('Impaired TCP connectivity failed')
                 time.sleep(1.2);snapshot=pair.sample()
                 for peer in snapshot['peers']:
                     stats=peer.get('telemetry',{})
@@ -52,7 +64,8 @@ def lifecycle():
                 row.update(status='pass',restart_recovery_sec=recoveries,speeds=speeds,udp_speeds=udp_speeds,end_snapshot=snapshot)
         except Exception as exc:row['error']=str(exc)
         record(row)
-        if row['status']!='pass':raise RuntimeError('RC5 lifecycle failed; retain evidence')
+        if row['status']!='pass':failures+=1
+    if failures:raise RuntimeError(f'{failures} RC5 lifecycle gates failed; retain all evidence')
 
 
 def transfer(pair,seconds,reverse):
@@ -74,6 +87,7 @@ def transfer(pair,seconds,reverse):
 
 
 def loss():
+    failures=0
     with tempfile.TemporaryDirectory() as temporary:
         root=Path(temporary);archive=root/'rc4.tar.gz'
         run('curl','-fL','--retry','3','https://github.com/MmdHoss3in/ggstunnel/releases/download/v0.3.4-rc4/ggstunnel-linux.tar.gz','-o',archive)
@@ -92,6 +106,7 @@ def loss():
                         row.update(transfer(pair,seconds,reverse))
                     if label=='rc4':old=row['received_mbps']
                     else:
+                        if old is None:raise RuntimeError('Paired RC4 measurement missing')
                         row['baseline_mbps']=old
                         target=max(3 if impairment=='1%' else 2,.9*old)
                         row['required_mbps']=target
@@ -100,7 +115,8 @@ def loss():
                         row['status']='pass'
                 except Exception as exc:row.update(status='fail',error=str(exc))
                 record(row)
-                if row['status']=='fail':raise RuntimeError('RC5 loss A/B failed; preserve source and results')
+                if row['status']=='fail':failures+=1
+    if failures:raise RuntimeError(f'{failures} RC5 loss A/B gates failed; preserve all results')
 
 
 if __name__=='__main__':

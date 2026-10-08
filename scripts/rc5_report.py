@@ -35,6 +35,8 @@ def validate_rows(rows, source):
         raise ValueError('Incomplete RC5 observations')
     for row in rows:
         if row['kind'] == 'rc5-lifecycle':
+            if row.get('restart_loss') != '0.15%' or row.get('capacity_loss') != '0%':
+                raise ValueError('Wrong restart/capacity recipe')
             recovery = row.get('restart_recovery_sec', [])
             if len(recovery) != 10 or any(not 0 <= value <= 20 for value in recovery):
                 raise ValueError('Missing or slow one-sided restart evidence')
@@ -43,6 +45,9 @@ def validate_rows(rows, source):
                 raise ValueError('Missing TCP capacity evidence')
             if len(udp) != 2 or any(s.get('received_mbps', 0) < 15 or (s.get('lost_percent') or 0) > 1 for s in udp):
                 raise ValueError('Missing UDP capacity/loss evidence')
+            impaired = row.get('impaired_speeds', [])
+            if len(impaired) != 2 or any(s.get('received_mbps', 0) < 1 for s in impaired):
+                raise ValueError('Missing impaired TCP connectivity observations')
             peers = row.get('end_snapshot', {}).get('peers', [])
             if len(peers) != 2 or any(not p.get('telemetry', {}).get('peer_authenticated') or
                                      p['telemetry'].get('internal_recoveries', 0) or
@@ -65,7 +70,9 @@ def report(directory, source):
     notes = '\n## Challenge lifecycle and RC4 loss A/B\n\n'
     notes += ('32 retained observations on native amd64/arm64. Six opaque challenge carriers each survive '
               'ten alternating one-sided restarts, retain the other process, and carry TCP and UDP in both '
-              'directions. BIP uses the same independent/delivery configuration for RC4 and candidate, '
+              'directions on clean paths. Restarts and separate low-loss TCP observations use 0.15% loss; '
+              'the latter retain only a 1Mbps connectivity floor, not a high-throughput guarantee. '
+              'BIP uses the same independent/delivery configuration for RC4 and candidate, '
               'on 200Mbps/80ms paths at 1%/3% loss for 30/120 measured seconds. Candidate gates require '
               'at least 90% of the paired RC4 rate, unchanged processes, zero internal recoveries and '
               'concurrent verified progress. These are short synthetic checks, not multiday or DPI guarantees. '

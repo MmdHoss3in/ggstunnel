@@ -11,6 +11,7 @@ class RC5ReportTests(unittest.TestCase):
             for profile in PROFILES:
                 rows.append(dict(kind='rc5-lifecycle', architecture=arch, profile=profile,
                                  source_commit='candidate', runtime_source_commit='candidate', status='pass',
+                                 restart_loss='0.15%', capacity_loss='0%', impaired_speeds=[dict(received_mbps=5)] * 2,
                                  restart_recovery_sec=[1] * 10, speeds=[dict(received_mbps=100)] * 2,
                                  udp_speeds=[dict(received_mbps=20, lost_percent=.2)] * 2,
                                  end_snapshot=dict(peers=[dict(telemetry=dict(peer_authenticated=True,

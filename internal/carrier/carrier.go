@@ -167,7 +167,7 @@ func enqueueContext(ctx context.Context, closed <-chan struct{}, ch chan []byte,
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-closed:
-		return errors.New("carrier closed")
+		return ErrClosed
 	default:
 	}
 	cp := append([]byte(nil), b...)
@@ -177,6 +177,6 @@ func enqueueContext(ctx context.Context, closed <-chan struct{}, ch chan []byte,
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-closed:
-		return errors.New("carrier closed")
+		return ErrClosed
 	}
 }

@@ -429,17 +429,30 @@ func (e *Engine) statsLoop(ctx context.Context) {
 				e.drops.Load(), e.replays.Load(), e.reflections.Load(), e.authFails.Load(), e.malformed.Load(), idle)
 			if s, ok := e.carrier.(carrier.Statser); ok {
 				cs := s.SnapshotStats()
-				base += fmt.Sprintf(" bip5{wire_tx=%s/%.2fMbps wire_rx=%s/%.2fMbps fast=%d pull=%d bootstrap=%d compat=%d idle_probe=%d fast_probe=%d fast_ack_tx=%d needpull=%d pull_probe=%d fast_ack_rx=%d needpull_rx=%d pull_probe_rx=%d reflect_supp=%d payload_rx=%d hmac_fail=%d dup=%d pending=%d backlog=%d retry=%d expired=%d overflow=%d promote=%d demote=%d fast_ok=%t pull_active=%t compat_active=%t txerr=%d}",
-					humanBytes(cs.WireTxBytes), mbps(cs.WireTxBytes-lastWireTx, dt),
-					humanBytes(cs.WireRxBytes), mbps(cs.WireRxBytes-lastWireRx, dt),
-					cs.FastDataTx, cs.PullDataTx, cs.BootstrapDataTx, cs.CompatDataTx, cs.IdleProbeTx, cs.FastProbeTx, cs.FastAckTx, cs.NeedPullTx, cs.PullProbeTx,
-					cs.FastAckRx, cs.NeedPullRx, cs.PullProbeRx, cs.ReflectionsSuppressed, cs.PayloadFrameRx, cs.HMACFail, cs.DataDuplicate,
-					cs.Pending, cs.Backlog, cs.Retransmits, cs.PendingExpired, cs.PendingOverflow, cs.FastPromotions, cs.FastDemotions, cs.FastHealthy, cs.PullActive, cs.CompatActive, cs.TxErrors)
-				lastWireTx, lastWireRx = cs.WireTxBytes, cs.WireRxBytes
-				base += fmt.Sprintf(" pull_feedback{data_rx=%d replies=%d outstanding=%d expired=%d budget=%.0fpps}",
-					cs.PulledDataRx, cs.PullRepliesRx, cs.PullOutstanding, cs.PullRequestsExpired, cs.PullBudgetPPS)
-				base += fmt.Sprintf(" health{authenticated=%t silent=%dms suspended=%t rehandshake=%d}",
-					cs.PeerAuthenticated, cs.PeerSilenceMS, cs.PathSuspended, cs.RehandshakeTries)
+				if e.cfg.Profile != "bip" {
+					authenticated := e.authenticatedRX.Load()
+					silent := int64(0)
+					if authenticated != 0 {
+						silent = max(0, now.Sub(time.Unix(0, authenticated)).Milliseconds())
+					}
+					base += fmt.Sprintf(" carrier{profile=%s wire=%s session=%s socket_tx=%s socket_rx=%s source_reject=%d format_reject=%d rx_drop=%d tx_drop=%d rxerr=%d txerr=%d control_reject=%d} health{authenticated=%t silent=%dms handshake_wait=%dms}",
+						e.cfg.Profile, e.cfg.Transport.WireMode, cs.SessionMode,
+						humanBytes(cs.SocketTxBytes), humanBytes(cs.SocketRxBytes),
+						cs.SourceRejected, cs.FormatRejected, cs.ReceiveQueueDrops, cs.TransmitQueueDrops,
+						cs.RxErrors, cs.TxErrors, cs.ControlRejected, authenticated != 0, silent, cs.HandshakeWaitMS)
+				} else {
+					base += fmt.Sprintf(" bip5{wire_tx=%s/%.2fMbps wire_rx=%s/%.2fMbps fast=%d pull=%d bootstrap=%d compat=%d idle_probe=%d fast_probe=%d fast_ack_tx=%d needpull=%d pull_probe=%d fast_ack_rx=%d needpull_rx=%d pull_probe_rx=%d reflect_supp=%d payload_rx=%d hmac_fail=%d dup=%d pending=%d backlog=%d retry=%d expired=%d overflow=%d promote=%d demote=%d fast_ok=%t pull_active=%t compat_active=%t txerr=%d}",
+						humanBytes(cs.WireTxBytes), mbps(cs.WireTxBytes-lastWireTx, dt),
+						humanBytes(cs.WireRxBytes), mbps(cs.WireRxBytes-lastWireRx, dt),
+						cs.FastDataTx, cs.PullDataTx, cs.BootstrapDataTx, cs.CompatDataTx, cs.IdleProbeTx, cs.FastProbeTx, cs.FastAckTx, cs.NeedPullTx, cs.PullProbeTx,
+						cs.FastAckRx, cs.NeedPullRx, cs.PullProbeRx, cs.ReflectionsSuppressed, cs.PayloadFrameRx, cs.HMACFail, cs.DataDuplicate,
+						cs.Pending, cs.Backlog, cs.Retransmits, cs.PendingExpired, cs.PendingOverflow, cs.FastPromotions, cs.FastDemotions, cs.FastHealthy, cs.PullActive, cs.CompatActive, cs.TxErrors)
+					lastWireTx, lastWireRx = cs.WireTxBytes, cs.WireRxBytes
+					base += fmt.Sprintf(" pull_feedback{data_rx=%d replies=%d outstanding=%d expired=%d budget=%.0fpps}",
+						cs.PulledDataRx, cs.PullRepliesRx, cs.PullOutstanding, cs.PullRequestsExpired, cs.PullBudgetPPS)
+					base += fmt.Sprintf(" health{authenticated=%t silent=%dms suspended=%t rehandshake=%d}",
+						cs.PeerAuthenticated, cs.PeerSilenceMS, cs.PathSuspended, cs.RehandshakeTries)
+				}
 			}
 			if c, ok := e.carrier.(interface{ SnapshotTuner() carrier.TunerSnapshot }); ok {
 				s := c.SnapshotTuner()

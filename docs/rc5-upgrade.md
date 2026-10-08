@@ -62,6 +62,9 @@ flight window, and one tunnel is not guaranteed to consume all CPU cores.
 Focused native amd64/arm64 gates cover forged/replayed/wrong-role challenges,
 receiver-bound data, alternating one-sided restarts for all six carriers, TCP/UDP
 capacity, and RC4/candidate BIP A/B at 1%/3% loss for 30/120 measured seconds.
+Restarts use 0.15% loss. Generic clean-path TCP capacity retains the original
+30Mbps floor; separate impaired TCP observations require only 1Mbps connectivity,
+and explicitly do not certify high-throughput outer TCP under loss.
 Existing reorder/capacity-step checks and every full release gate remain. Release
 publication additionally requires complete, unique, exact-source RC5 artifacts.
 Failures are retained and fixed under a new source commit, never relabeled passes.
