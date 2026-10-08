@@ -1,0 +1,40 @@
+name: RC5 retained loss variance diagnosis
+on:
+  push:
+    branches: [diagnostic/rc5-loss-variance]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: aab18976517393dc87a1437eceaca63169ccee66
+          path: release-source
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Build the immutable failed candidate, without runtime changes
+        run: |
+          test "$(git -C release-source rev-parse HEAD)" = aab18976517393dc87a1437eceaca63169ccee66
+          (cd release-source && bash scripts/build-release.sh)
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool iptables
+      - name: Three order-balanced RC4 A/A and RC5 A/B observations
+        run: sudo env GITHUB_ACTIONS=true python3 scripts/rc5_loss_variance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc5-loss-variance-${{ matrix.runner }}
+          path: extended-results/
