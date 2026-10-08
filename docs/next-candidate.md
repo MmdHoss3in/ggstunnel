@@ -15,10 +15,11 @@ existing config without this field retains `ordered`; option 21 selects the new
 recipe, saves a backup, and restarts only services that were running.
 
 The adaptive `tuner.algorithm="delivery"` controller uses clean RTT samples,
-RTT-sized delivery epochs and bounded learned capacity. Continuing delivery at
-low queue delay permits paced repair without cutting the window for every SACK
-hole. Persistent queue or a stalled delivery clock backs off. This is a custom
-experimental controller, not BBR; ACK compression is not fully modeled.
+RTT-sized delivery epochs and bounded learned capacity. Continuing delivery
+permits paced repair without cutting the window for every SACK hole, including
+repair of an already queued flight. Fresh post-cut queue timing or a stalled
+delivery clock backs off. This is a custom experimental controller, not BBR;
+ACK compression is not fully modeled.
 `tuner.algorithm="loss"` retains the previous controller for rollback. Explicit
 PPS limits still work; `unlimited_rate=true` removes the configured PPS ceiling,
 and retains congestion pacing. It is not an unlimited-throughput guarantee.

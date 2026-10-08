@@ -1,6 +1,6 @@
 # Release notes
 
-## v0.3.4-rc4 — candidate in focused validation
+## v0.3.4-rc4 — candidate awaiting complete tagged validation
 
 rc3 kept passing compilation, race/unit and ARM smoke checks, but the Ubuntu
 22.04 four-second compact startup sample still measured 75.568Mbps, below the
@@ -11,7 +11,16 @@ queue or repair evidence ends clean startup. All rc3 timing/queue fixes remain.
 
 A short three-platform diagnosis checks the exact cold compact gate, repeated
 controller tests, established-flow reordering, a 200-to-5Mbps step and 1/3% loss.
-It does not publish releases and cannot substitute for full exact-tagged gates.
+It passed on Ubuntu 22.04, Ubuntu 24.04 and Ubuntu 24.04 ARM64 in
+[run 37820599893](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37820599893).
+Cold compact samples measured 105.673–177.223Mbps. The short 1% loss samples
+measured 47.299–160.693Mbps; 3% samples measured 25.686–54.261Mbps. Reordering
+kept verified progress without internal recovery. The 200-to-5Mbps capacity step
+recovered with one internal transport recovery per run; this can interrupt
+existing application connections and is still an area for improvement.
+These focused observations are tied to code commit ce8cffb; subsequent edits
+before tagging only remove duplicated documentation and add these results.
+They do not publish releases and cannot substitute for full exact-tagged gates.
 
 ## v0.3.4-rc3 — bounded startup and fresh timing for queue decisions
 
@@ -36,34 +45,6 @@ fell below 100Mbps, and sustained reordering/capacity-step cases stalled.
   it selectively or moving its tag. Every rc3 observation must use rc3 source.
 
 This remains a candidate with the experimental carrier limitations below.
-
-## v0.3.4-rc2 — loss-path candidate and experimental opaque/DCPI
-
-The previous rc1 run passed the captured directional control checks but failed
-two retained 3% loss samples below the existing 1Mbps floor. It was not released.
-This candidate preserves the control fix and targets the loss bottleneck; no
-measured speed improvement is claimed before the exact-tagged run finishes.
-
-- Add explicit independent BIP receive delivery, atomic packed admission and a
-  matching bounded inner replay span. New samples/menu installations select it;
-  old configs without the field keep ordered. Option 21 adopts the new recipe.
-- Add a delivery/queue adaptive controller with clean RTT, bounded epoch peaks,
-  queue backoff and paced isolated-loss repair. Explicit loss-controller rollback
-  and rate ceilings remain available. This is experimental custom code, not BBR.
-- Add explicit opaque non-BIP frames (37-byte envelope vs 60), encrypted metadata,
-  masked sequence and separate domain keys; remove public raw markers/TCP greeting
-  only in this incompatible mode. Add GGS4 join codes and option 23.
-- Add experimental DCPI over IPv4 protocol 58, opaque only, no TCP/UDP port or
-  Dagger wire compatibility. Existing carrier settings keep their wire format.
-- Clamp frame payload against the local underlay MTU without lowering the TUN
-  MTU; improve root authentication/payload telemetry and add diagnostic option 24.
-- Preserve every existing gate and add native amd64/arm64 opaque carrier, MTU,
-  and loss-controller A/B observations plus authenticated parser fuzzing.
-
-See [candidate limitations](docs/next-candidate.md). Opaque UDP/raw currently fail
-closed after four peer identities; generic fresh-challenge rotation and complete
-PLPMTUD remain follow-up work. Stable publication, multiday reliability, DPI
-resistance and a universal 15% cost ceiling are not certified by these changes.
 
 ## v0.3.4-rc2 — loss-path candidate and experimental opaque/DCPI
 
