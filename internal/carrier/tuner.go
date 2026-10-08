@@ -22,26 +22,28 @@ type bipTuner struct {
 }
 
 type TunerSnapshot struct {
-	WindowLimit    int     `json:"window_limit_frames"`
-	Mode           string  `json:"mode"`
-	PathMode       string  `json:"path_mode,omitempty"`
-	Threshold      int     `json:"slow_start_threshold_frames,omitempty"`
-	SRTTMS         float64 `json:"srtt_ms"`
-	RTTVariationMS float64 `json:"rtt_variation_ms"`
-	RTOMS          float64 `json:"rto_ms"`
-	Window         int     `json:"window_frames"`
-	PacingPPS      float64 `json:"pacing_pps"`
-	Burst          int     `json:"burst_frames"`
-	AckedFrames    uint64  `json:"acked_frames"`
-	RTTSamples     uint64  `json:"rtt_samples"`
-	CongestionCuts uint64  `json:"congestion_cuts"`
-	Resets         uint64  `json:"resets"`
-	Algorithm      string  `json:"algorithm,omitempty"`
-	BaseRTTMS      float64 `json:"base_rtt_ms,omitempty"`
-	QueueDelayMS   float64 `json:"queue_delay_ms,omitempty"`
-	DeliveryMbps   float64 `json:"delivery_mbps,omitempty"`
-	FlightBytes    uint64  `json:"flight_bytes,omitempty"`
-	LossRepairs    uint64  `json:"loss_repairs,omitempty"`
+	WindowLimit      int     `json:"window_limit_frames"`
+	Mode             string  `json:"mode"`
+	PathMode         string  `json:"path_mode,omitempty"`
+	Threshold        int     `json:"slow_start_threshold_frames,omitempty"`
+	SRTTMS           float64 `json:"srtt_ms"`
+	RTTVariationMS   float64 `json:"rtt_variation_ms"`
+	RTOMS            float64 `json:"rto_ms"`
+	Window           int     `json:"window_frames"`
+	PacingPPS        float64 `json:"pacing_pps"`
+	Burst            int     `json:"burst_frames"`
+	AckedFrames      uint64  `json:"acked_frames"`
+	RTTSamples       uint64  `json:"rtt_samples"`
+	CongestionCuts   uint64  `json:"congestion_cuts"`
+	Resets           uint64  `json:"resets"`
+	Algorithm        string  `json:"algorithm,omitempty"`
+	BaseRTTMS        float64 `json:"base_rtt_ms,omitempty"`
+	QueueDelayMS     float64 `json:"queue_delay_ms,omitempty"`
+	DeliveryMbps     float64 `json:"delivery_mbps,omitempty"`
+	FlightBytes      uint64  `json:"flight_bytes,omitempty"`
+	LossRepairs      uint64  `json:"loss_repairs,omitempty"`
+	AppLimitedEpochs uint64  `json:"app_limited_epochs,omitempty"`
+	RepairFraction   float64 `json:"repair_fraction,omitempty"`
 }
 
 func (t *bipTuner) resizeWindow(limit int) {
@@ -250,6 +252,12 @@ func (t *bipTuner) timeout(retries int) time.Duration {
 	}
 	return t.clampRTO(t.rto * time.Duration(1<<min(retries, 6)))
 }
+func (t *bipTuner) timeoutAt(retries int, now time.Time) time.Duration {
+	if t.adaptive() && t.workingDeliveryClock(now) {
+		return t.clampRTO(t.rto * time.Duration(1<<min(retries, 2)))
+	}
+	return t.timeout(retries)
+}
 func (t *bipTuner) snapshot() TunerSnapshot {
 	if !t.adaptive() {
 		return TunerSnapshot{WindowLimit: t.maxWindow, Mode: t.cfg.Mode, RTOMS: float64(t.initialRTO) / float64(time.Millisecond), Window: t.maxWindow, AckedFrames: t.acked, Resets: t.resets}
@@ -258,5 +266,5 @@ func (t *bipTuner) snapshot() TunerSnapshot {
 	if t.activePath > 0 && t.activePath < 4 {
 		pathMode = [4]string{"", "fast", "pull", "compat"}[t.activePath]
 	}
-	return TunerSnapshot{WindowLimit: t.maxWindow, Mode: t.cfg.Mode, PathMode: pathMode, Threshold: int(t.threshold), SRTTMS: float64(t.srtt) / float64(time.Millisecond), RTTVariationMS: float64(t.variance) / float64(time.Millisecond), RTOMS: float64(t.rto) / float64(time.Millisecond), Window: t.window(), PacingPPS: t.rate(), Burst: t.burst(), AckedFrames: t.acked, RTTSamples: t.samples, CongestionCuts: t.cuts, Resets: t.resets, Algorithm: t.cfg.Algorithm, BaseRTTMS: float64(t.delivery.baseRTT) / float64(time.Millisecond), QueueDelayMS: float64(t.delivery.queueDelay(t.srtt)) / float64(time.Millisecond), DeliveryMbps: t.delivery.rate * 8 / 1e6, FlightBytes: t.delivery.flightBytes, LossRepairs: t.delivery.repairs}
+	return TunerSnapshot{WindowLimit: t.maxWindow, Mode: t.cfg.Mode, PathMode: pathMode, Threshold: int(t.threshold), SRTTMS: float64(t.srtt) / float64(time.Millisecond), RTTVariationMS: float64(t.variance) / float64(time.Millisecond), RTOMS: float64(t.rto) / float64(time.Millisecond), Window: t.window(), PacingPPS: t.rate(), Burst: t.burst(), AckedFrames: t.acked, RTTSamples: t.samples, CongestionCuts: t.cuts, Resets: t.resets, Algorithm: t.cfg.Algorithm, BaseRTTMS: float64(t.delivery.baseRTT) / float64(time.Millisecond), QueueDelayMS: float64(t.delivery.queueDelay(t.srtt)) / float64(time.Millisecond), DeliveryMbps: t.delivery.rate * 8 / 1e6, FlightBytes: t.delivery.flightBytes, LossRepairs: t.delivery.repairs, AppLimitedEpochs: t.delivery.appLimitedEpochs, RepairFraction: t.delivery.repairFraction}
 }

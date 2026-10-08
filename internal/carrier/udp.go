@@ -23,6 +23,7 @@ type UDP struct {
 	startMu   sync.Mutex
 	started   bool
 	workers   sync.WaitGroup
+	stats     datagramStats
 }
 
 func NewUDP(c *config.Config) *UDP {
@@ -31,7 +32,14 @@ func NewUDP(c *config.Config) *UDP {
 func (u *UDP) Name() string         { return "udp" }
 func (u *UDP) Recv() <-chan []byte  { return u.rx }
 func (u *UDP) Errors() <-chan error { return u.errors }
-func (u *UDP) Send(b []byte) error  { return enqueueOpen(u.closeCh, u.tx, b) }
+func (u *UDP) Send(b []byte) error {
+	err := enqueueOpen(u.closeCh, u.tx, b)
+	if errors.Is(err, ErrQueueFull) {
+		u.stats.txDrops.Add(1)
+	}
+	return err
+}
+func (u *UDP) SnapshotStats() RuntimeStats { return u.stats.snapshot() }
 func (u *UDP) Start(ctx context.Context) error {
 	u.startMu.Lock()
 	defer u.startMu.Unlock()
@@ -96,11 +104,18 @@ func (u *UDP) readLoopScalar(ctx context.Context) {
 			case <-u.closeCh:
 				return
 			default:
+				u.stats.rxErrors.Add(1)
 				u.fail(err)
 				return
 			}
 		}
-		if !src.IP.Equal(u.peer.IP) || src.Port != u.peer.Port || n > u.cfg.ReceiveFrameLimit() {
+		u.stats.receive(n)
+		if !src.IP.Equal(u.peer.IP) || src.Port != u.peer.Port {
+			u.stats.sourceRejected.Add(1)
+			continue
+		}
+		if n > u.cfg.ReceiveFrameLimit() {
+			u.stats.formatRejected.Add(1)
 			continue
 		}
 		b := append([]byte(nil), buf[:n]...)
@@ -111,6 +126,7 @@ func (u *UDP) readLoopScalar(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+			u.stats.rxDrops.Add(1)
 		}
 	}
 }
@@ -120,9 +136,11 @@ func (u *UDP) writeLoopScalar(ctx context.Context) {
 		case b := <-u.tx:
 			u.conn.SetWriteDeadline(time.Now().Add(u.cfg.IdleTimeout()))
 			if _, err := u.conn.WriteToUDP(b, u.peer); err != nil {
+				u.stats.txErrors.Add(1)
 				u.fail(err)
 				return
 			}
+			u.stats.sent(len(b))
 		case <-ctx.Done():
 			return
 		case <-u.closeCh:

@@ -42,13 +42,27 @@ type RuntimeStats struct {
 	ReplyControlTx uint64 `json:"reply_control_tx"`
 	ReplyControlRx uint64 `json:"reply_control_rx"`
 
-	PeerAuthenticated bool   `json:"peer_authenticated"`
-	PeerSilenceMS     int64  `json:"peer_silence_ms"`
-	RehandshakeTries  uint64 `json:"rehandshake_attempts"`
-	HandshakeWaitMS   int64  `json:"handshake_wait_ms"`
-	ACKsCoalesced     uint64 `json:"acks_coalesced"`
-	WireMode          string `json:"wire_mode,omitempty"`
-	DeliveryMode      string `json:"delivery_mode,omitempty"`
+	PeerAuthenticated  bool   `json:"peer_authenticated"`
+	PeerSilenceMS      int64  `json:"peer_silence_ms"`
+	RehandshakeTries   uint64 `json:"rehandshake_attempts"`
+	HandshakeWaitMS    int64  `json:"handshake_wait_ms"`
+	ACKsCoalesced      uint64 `json:"acks_coalesced"`
+	WireMode           string `json:"wire_mode,omitempty"`
+	SessionMode        string `json:"session_mode,omitempty"`
+	ControlPacketsTx   uint64 `json:"control_packets_tx,omitempty"`
+	ControlPacketsRx   uint64 `json:"control_packets_rx,omitempty"`
+	ControlRejected    uint64 `json:"control_rejected,omitempty"`
+	ReceiveQueueDrops  uint64 `json:"receive_queue_drops,omitempty"`
+	SocketRxBytes      uint64 `json:"socket_rx_bytes,omitempty"`
+	SocketTxBytes      uint64 `json:"socket_tx_bytes,omitempty"`
+	SocketRxPackets    uint64 `json:"socket_rx_packets,omitempty"`
+	SocketTxPackets    uint64 `json:"socket_tx_packets,omitempty"`
+	SourceRejected     uint64 `json:"source_rejected,omitempty"`
+	FormatRejected     uint64 `json:"format_rejected,omitempty"`
+	TransmitQueueDrops uint64 `json:"transmit_queue_drops,omitempty"`
+	RxErrors           uint64 `json:"rx_errors,omitempty"`
+	ByteAccounting     string `json:"byte_accounting,omitempty"`
+	DeliveryMode       string `json:"delivery_mode,omitempty"`
 
 	FastDataTx      uint64 `json:"fast_data_tx"`
 	PullDataTx      uint64 `json:"pull_data_tx"`
@@ -90,6 +104,15 @@ type RuntimeStats struct {
 type Statser interface{ SnapshotStats() RuntimeStats }
 
 func New(c *config.Config) (Carrier, error) {
+	if c.Transport.OpaqueSession == "challenge" {
+		innerConfig := *c
+		innerConfig.Transport.OpaqueSession = ""
+		inner, err := New(&innerConfig)
+		if err != nil {
+			return nil, err
+		}
+		return newAuthenticatedCarrier(c, inner)
+	}
 	switch c.Profile {
 	case "tcp":
 		return NewTCP(c), nil

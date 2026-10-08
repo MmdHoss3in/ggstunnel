@@ -34,6 +34,56 @@ func NewOpaqueCodec(psk string) (*Codec, error) {
 	return c, err
 }
 
+// The challenge lifecycle uses a separate data-key domain bound to BOTH
+// endpoint identities. A local restart cannot reset replay protection for
+// ciphertext addressed to an old local identity, even if the sender stays up.
+func NewBoundOpaqueCodec(psk string) (*Codec, error) {
+	c, err := NewOpaqueCodec(psk)
+	if err != nil {
+		return nil, err
+	}
+	c.boundOpaque = true
+	return c, nil
+}
+func (c *Codec) BindSendPeer(id uint64) error {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if !c.boundOpaque || id == 0 || id == c.sessionID {
+		return ErrPeerNotBound
+	}
+	if c.sendPeer == id {
+		return nil
+	}
+	aead, header, err := c.boundOpaqueKeys(c.sessionID, id)
+	if err != nil {
+		return err
+	}
+	c.aead, c.opaque.send, c.sendPeer = aead, header, id
+	return nil
+}
+func (c *Codec) boundOpaqueKeys(sender, receiver uint64) (cipher.AEAD, cipher.Block, error) {
+	var salt [16]byte
+	binary.BigEndian.PutUint64(salt[:8], sender)
+	binary.BigEndian.PutUint64(salt[8:], receiver)
+	derive := func(label string) (cipher.Block, error) {
+		key, err := hkdf.Key(sha256.New, c.master, salt[:], "ggstunnel/opaque-bound/"+label+"/v2", 32)
+		if err != nil {
+			return nil, err
+		}
+		return aes.NewCipher(key)
+	}
+	b, err := derive("data")
+	if err != nil {
+		return nil, nil, err
+	}
+	aead, err := cipher.NewGCM(b)
+	if err != nil {
+		return nil, nil, err
+	}
+	header, err := derive("header")
+	return aead, header, err
+}
+
 func (c *Codec) opaqueKeys(sid uint64) (cipher.AEAD, cipher.Block, error) {
 	var salt [8]byte
 	binary.BigEndian.PutUint64(salt[:], sid)
@@ -107,7 +157,11 @@ func (c *Codec) openOpaque(b []byte) (*Decoded, error) {
 	aead, header := c.receiver, c.opaque.receive
 	if c.receiverID != sid {
 		var err error
-		aead, header, err = c.opaqueKeys(sid)
+		if c.boundOpaque {
+			aead, header, err = c.boundOpaqueKeys(sid, c.sessionID)
+		} else {
+			aead, header, err = c.opaqueKeys(sid)
+		}
 		if err != nil {
 			return nil, err
 		}

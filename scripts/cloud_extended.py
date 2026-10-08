@@ -72,6 +72,7 @@ class Pair:
         self.outer = ['192.0.2.1', '198.51.100.1']
         self.p = [None, None]; self.units = ['ggs-cloud-a', 'ggs-cloud-b']
         self.executables = [BIN, BIN]
+        self.baseline_preserve_config = False
         self.children = []; self.created = []; self.logs = []
         self.tmp = tempfile.TemporaryDirectory(); self.path = Path(self.tmp.name)
         self.stats_paths = [self.path / f'stats-{i}.json' for i in range(2)]
@@ -151,7 +152,7 @@ class Pair:
             run('systemctl','start',self.units[i])
         else:
             config_path = self.path / f'{i}.json'
-            if self.executables[i] != BIN:
+            if self.executables[i] != BIN and not self.baseline_preserve_config:
                 # Historical baselines reject unknown fields. Preserve their
                 # original algorithm/delivery without downgrading the candidate.
                 cfg = json.loads(config_path.read_text())

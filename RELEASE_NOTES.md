@@ -1,5 +1,15 @@
 # Release notes
 
+## v0.3.4-rc5 — implementation, not yet validated or published
+
+Explicit opaque challenge lifecycle (GGS5) binds data keys to sender AND receiver
+identities; GGS4/v1 remains unchanged. Add UDP/raw socket counters, accurate
+generic peer health and option 25 for reversible transport changes preserving
+TUN addresses/routes/PSK/forwards. Delivery-controller experiments preserve
+application-limited peak estimates, probe low-queue self-limited flight and
+bound repair delay only while authenticated delivery continues. No measured
+performance improvement, multiday guarantee or completed PLPMTUD is claimed yet.
+
 ## v0.3.4-rc4 — published prerelease with retained validation history
 
 Published [RC4](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4-rc4)

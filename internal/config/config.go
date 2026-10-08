@@ -90,6 +90,7 @@ type TransportConfig struct {
 	BIPWireMode            string `json:"bip_wire_mode,omitempty"`
 	BIPDelivery            string `json:"bip_delivery,omitempty"`
 	WireMode               string `json:"wire_mode,omitempty"`
+	OpaqueSession          string `json:"opaque_session,omitempty"`
 }
 
 type PerformanceConfig struct {
@@ -299,6 +300,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Transport.WireMode != "" && c.Transport.WireMode != "legacy" && c.Transport.WireMode != "opaque" {
 		return errors.New("transport.wire_mode must be legacy or opaque")
+	}
+	if c.Transport.OpaqueSession != "" && c.Transport.OpaqueSession != "challenge" {
+		return errors.New("opaque_session must be empty or challenge")
+	}
+	if c.Transport.OpaqueSession == "challenge" && (c.Transport.WireMode != "opaque" || c.Profile == "bip") {
+		return errors.New("challenge session requires a non-BIP opaque carrier")
 	}
 	if c.Profile == "bip" && c.Transport.WireMode == "opaque" {
 		return errors.New("BIP uses bip_wire_mode=compact rather than wire_mode=opaque")

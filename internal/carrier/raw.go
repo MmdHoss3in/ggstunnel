@@ -28,6 +28,7 @@ type rawCarrier struct {
 	startMu       sync.Mutex
 	started       bool
 	workers       sync.WaitGroup
+	stats         datagramStats
 }
 
 func NewRaw(c *config.Config, kind string) (Carrier, error) {
@@ -53,7 +54,14 @@ func NewRaw(c *config.Config, kind string) (Carrier, error) {
 func (r *rawCarrier) Errors() <-chan error { return r.errors }
 func (r *rawCarrier) Name() string         { return r.kind }
 func (r *rawCarrier) Recv() <-chan []byte  { return r.rx }
-func (r *rawCarrier) Send(b []byte) error  { return enqueueOpen(r.closeCh, r.tx, b) }
+func (r *rawCarrier) Send(b []byte) error {
+	err := enqueueOpen(r.closeCh, r.tx, b)
+	if errors.Is(err, ErrQueueFull) {
+		r.stats.txDrops.Add(1)
+	}
+	return err
+}
+func (r *rawCarrier) SnapshotStats() RuntimeStats { return r.stats.snapshot() }
 func (r *rawCarrier) Start(ctx context.Context) error {
 	r.startMu.Lock()
 	defer r.startMu.Unlock()
@@ -219,6 +227,7 @@ func (r *rawCarrier) readLoopScalar(ctx context.Context) {
 			select {
 			case <-r.closeCh:
 			default:
+				r.stats.rxErrors.Add(1)
 				select {
 				case r.errors <- err:
 				default:
@@ -226,7 +235,9 @@ func (r *rawCarrier) readLoopScalar(ctx context.Context) {
 			}
 			return
 		}
+		r.stats.receive(n)
 		if !src.IP.Equal(r.peer.IP) {
+			r.stats.sourceRejected.Add(1)
 			continue
 		}
 		if p, ok := r.unwrap(buf[:n]); ok && len(p) > 0 && len(p) <= r.cfg.ReceiveFrameLimit() {
@@ -238,7 +249,10 @@ func (r *rawCarrier) readLoopScalar(ctx context.Context) {
 			case <-r.closeCh:
 				return
 			default:
+				r.stats.rxDrops.Add(1)
 			}
+		} else {
+			r.stats.formatRejected.Add(1)
 		}
 	}
 }
@@ -249,12 +263,14 @@ func (r *rawCarrier) writeLoopScalar(ctx context.Context) {
 			p := r.wrap(b)
 			r.conn.SetWriteDeadline(time.Now().Add(r.cfg.IdleTimeout()))
 			if _, err := r.conn.WriteToIP(p, r.peer); err != nil {
+				r.stats.txErrors.Add(1)
 				select {
 				case r.errors <- err:
 				default:
 				}
 				return
 			}
+			r.stats.sent(len(p))
 		case <-ctx.Done():
 			return
 		case <-r.closeCh:

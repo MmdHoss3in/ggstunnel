@@ -29,6 +29,7 @@ var (
 	ErrReflectedLocal = errors.New("reflected local frame")
 	ErrReplay         = errors.New("replayed or stale frame")
 	ErrAuthentication = errors.New("authentication failed")
+	ErrPeerNotBound   = errors.New("authenticated receiver identity required")
 )
 
 type Header struct {
@@ -58,6 +59,9 @@ type Codec struct {
 	peerSession  uint64
 	replayWindow uint64
 	opaque       *opaqueState
+	sendMu       sync.RWMutex
+	boundOpaque  bool
+	sendPeer     uint64
 }
 
 func NewCodec(psk string) (*Codec, error) {
@@ -103,7 +107,16 @@ func (c *Codec) dataAEAD(sid uint64) (cipher.AEAD, error) {
 func (c *Codec) NextPacketID() uint32 { return c.packetID.Add(1) }
 func (c *Codec) SessionID() uint64    { return c.sessionID }
 
+// Leave nonce space for concurrently queued heartbeats/fragmented packets.
+// The engine joins all workers before constructing a fresh sender/key.
+func (c *Codec) RotationDue() bool { return c.seq.Load() >= (1<<32)-4096 }
+
 func (c *Codec) Seal(typ byte, packetID uint32, fragIndex, fragCount uint16, payload []byte) ([]byte, error) {
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+	if c.boundOpaque && c.sendPeer == 0 {
+		return nil, ErrPeerNotBound
+	}
 	if c.opaque != nil {
 		return c.sealOpaque(typ, packetID, fragIndex, fragCount, payload)
 	}
@@ -174,6 +187,9 @@ func (c *Codec) OpenForSession(b []byte, sid uint64) (*Decoded, error) {
 	got, ok := PeekSessionID(b)
 	if c.opaque != nil {
 		got, ok = c.opaqueSession(b)
+	}
+	if ok && got == c.sessionID {
+		return nil, ErrReflectedLocal
 	}
 	if !ok || got != sid {
 		return nil, ErrAuthentication

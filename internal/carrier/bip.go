@@ -714,7 +714,7 @@ func (b *BIP) queuePending(x outData, mode byte, now time.Time) {
 	p := &pendingData{item: x, sent: now, mode: mode, index: -1}
 	if b.tuner != nil {
 		b.tuner.onSend(len(x.data), x.retries > 0, now)
-		p.deadline = now.Add(b.tuner.timeout(x.retries))
+		p.deadline = now.Add(b.tuner.timeoutAt(x.retries, now))
 	} else {
 		p.deadline = now.Add(time.Duration(b.cfg.Transport.BIPRTOMS) * time.Millisecond)
 	}

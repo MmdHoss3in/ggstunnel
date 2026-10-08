@@ -92,7 +92,13 @@ func writeDatagramBatch(socket datagramSocket, packets [][]byte, peer net.IP, po
 
 func (u *UDP) readLoop(ctx context.Context) {
 	err := readDatagramBatch(ctx, u.conn, func(payload []byte, source net.IP, port int) {
-		if !source.Equal(u.peer.IP) || port != u.peer.Port || len(payload) > u.cfg.ReceiveFrameLimit() {
+		u.stats.receive(len(payload))
+		if !source.Equal(u.peer.IP) || port != u.peer.Port {
+			u.stats.sourceRejected.Add(1)
+			return
+		}
+		if len(payload) > u.cfg.ReceiveFrameLimit() {
+			u.stats.formatRejected.Add(1)
 			return
 		}
 		cp := append([]byte(nil), payload...)
@@ -101,6 +107,7 @@ func (u *UDP) readLoop(ctx context.Context) {
 		case <-ctx.Done():
 		case <-u.closeCh:
 		default:
+			u.stats.rxDrops.Add(1)
 		}
 	})
 	if errors.Is(err, syscall.ENOSYS) {
@@ -115,21 +122,30 @@ func (u *UDP) readLoop(ctx context.Context) {
 	default:
 	}
 	if err != nil {
+		u.stats.rxErrors.Add(1)
 		u.fail(err)
 	}
 }
 
 func (r *rawCarrier) readLoop(ctx context.Context) {
 	err := readDatagramBatch(ctx, r.conn, func(packet []byte, source net.IP, _ int) {
-		if !source.Equal(r.peer.IP) || len(packet) < 20 || packet[0]>>4 != 4 {
+		if len(packet) < 20 || packet[0]>>4 != 4 {
+			r.stats.formatRejected.Add(1)
 			return
 		}
 		ihl := int(packet[0]&15) * 4
 		if ihl < 20 || ihl > len(packet) {
+			r.stats.formatRejected.Add(1)
+			return
+		}
+		r.stats.receive(len(packet) - ihl)
+		if !source.Equal(r.peer.IP) {
+			r.stats.sourceRejected.Add(1)
 			return
 		}
 		payload, ok := r.unwrap(packet[ihl:])
 		if !ok || len(payload) == 0 || len(payload) > r.cfg.ReceiveFrameLimit() {
+			r.stats.formatRejected.Add(1)
 			return
 		}
 		cp := append([]byte(nil), payload...)
@@ -138,6 +154,7 @@ func (r *rawCarrier) readLoop(ctx context.Context) {
 		case <-ctx.Done():
 		case <-r.closeCh:
 		default:
+			r.stats.rxDrops.Add(1)
 		}
 	})
 	if errors.Is(err, syscall.ENOSYS) {
@@ -152,6 +169,7 @@ func (r *rawCarrier) readLoop(ctx context.Context) {
 	default:
 	}
 	if err != nil {
+		r.stats.rxErrors.Add(1)
 		select {
 		case r.errors <- err:
 		default:
@@ -159,7 +177,7 @@ func (r *rawCarrier) readLoop(ctx context.Context) {
 	}
 }
 
-func writeQueuedDatagrams(ctx context.Context, closed <-chan struct{}, tx <-chan []byte, socket datagramSocket, peer net.IP, port int, timeout time.Duration, wrap func([]byte) []byte, scalar func([]byte) error) error {
+func writeQueuedDatagrams(ctx context.Context, closed <-chan struct{}, tx <-chan []byte, socket datagramSocket, peer net.IP, port int, timeout time.Duration, wrap func([]byte) []byte, scalar func([]byte) error, metrics ...*datagramStats) error {
 	packets := make([][]byte, 0, 32)
 	fallback := false
 	for {
@@ -191,6 +209,11 @@ func writeQueuedDatagrams(ctx context.Context, closed <-chan struct{}, tx <-chan
 			if !fallback {
 				var err error
 				sent, err = writeDatagramBatch(socket, packets, peer, port)
+				if len(metrics) > 0 {
+					for _, p := range packets[:sent] {
+						metrics[0].sent(len(p))
+					}
+				}
 				if errors.Is(err, syscall.ENOSYS) {
 					fallback = true
 				} else if err != nil {
@@ -200,6 +223,9 @@ func writeQueuedDatagrams(ctx context.Context, closed <-chan struct{}, tx <-chan
 			for _, p := range packets[sent:] {
 				if err := scalar(p); err != nil {
 					return err
+				}
+				if len(metrics) > 0 {
+					metrics[0].sent(len(p))
 				}
 			}
 		case <-ctx.Done():
@@ -211,7 +237,7 @@ func writeQueuedDatagrams(ctx context.Context, closed <-chan struct{}, tx <-chan
 }
 
 func (u *UDP) writeLoop(ctx context.Context) {
-	err := writeQueuedDatagrams(ctx, u.closeCh, u.tx, u.conn, u.peer.IP, u.peer.Port, u.cfg.IdleTimeout(), func(p []byte) []byte { return p }, func(p []byte) error { _, err := u.conn.WriteToUDP(p, u.peer); return err })
+	err := writeQueuedDatagrams(ctx, u.closeCh, u.tx, u.conn, u.peer.IP, u.peer.Port, u.cfg.IdleTimeout(), func(p []byte) []byte { return p }, func(p []byte) error { _, err := u.conn.WriteToUDP(p, u.peer); return err }, &u.stats)
 	select {
 	case <-u.closeCh:
 		return
@@ -220,12 +246,13 @@ func (u *UDP) writeLoop(ctx context.Context) {
 	default:
 	}
 	if err != nil {
+		u.stats.txErrors.Add(1)
 		u.fail(err)
 	}
 }
 
 func (r *rawCarrier) writeLoop(ctx context.Context) {
-	err := writeQueuedDatagrams(ctx, r.closeCh, r.tx, r.conn, r.peer.IP, 0, r.cfg.IdleTimeout(), r.wrap, func(p []byte) error { _, err := r.conn.WriteToIP(p, r.peer); return err })
+	err := writeQueuedDatagrams(ctx, r.closeCh, r.tx, r.conn, r.peer.IP, 0, r.cfg.IdleTimeout(), r.wrap, func(p []byte) error { _, err := r.conn.WriteToIP(p, r.peer); return err }, &r.stats)
 	select {
 	case <-r.closeCh:
 		return
@@ -234,6 +261,7 @@ func (r *rawCarrier) writeLoop(ctx context.Context) {
 	default:
 	}
 	if err != nil {
+		r.stats.txErrors.Add(1)
 		select {
 		case r.errors <- err:
 		default:

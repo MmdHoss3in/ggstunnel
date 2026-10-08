@@ -17,6 +17,10 @@ type deliveryController struct {
 	average, rate                        float64
 	peaks                                [8]float64
 	round                                int
+	epochBacklogged                      bool
+	appLimitedEpochs                     uint64
+	epochOriginal, epochRetry            uint64
+	repairFraction                       float64
 }
 
 func (d *deliveryController) queueDelay(srtt time.Duration) time.Duration {
@@ -36,9 +40,14 @@ func (t *bipTuner) queueBudget() time.Duration {
 }
 
 func (t *bipTuner) onSend(size int, retry bool, now time.Time) {
-	if !t.adaptive() || t.cfg.Algorithm != "delivery" || retry {
+	if !t.adaptive() || t.cfg.Algorithm != "delivery" {
 		return
 	}
+	if retry {
+		t.delivery.epochRetry++
+		return
+	}
+	t.delivery.epochOriginal++
 	t.delivery.flightBytes += uint64(max(0, size))
 	if t.delivery.epoch.IsZero() {
 		t.delivery.epoch = now
@@ -68,7 +77,15 @@ func (t *bipTuner) onDelivered(bytes, packets int, backlogged bool, now time.Tim
 		return
 	}
 	d := &t.delivery
+	if !d.lastProgress.IsZero() && now.Sub(d.lastProgress) > max(t.srtt, d.baseRTT)*4 {
+		// Do not amortize a new burst across a previous application idle gap.
+		d.epoch = now
+		d.bytes = 0
+		d.packets = 0
+		d.epochBacklogged = false
+	}
 	d.lastProgress = now
+	d.epochBacklogged = d.epochBacklogged || backlogged
 	d.flightBytes -= min(d.flightBytes, uint64(max(0, bytes)))
 	d.bytes += uint64(max(0, bytes))
 	d.packets += uint64(packets)
@@ -80,16 +97,24 @@ func (t *bipTuner) onDelivered(bytes, packets int, backlogged bool, now time.Tim
 	if d.baseRTT == 0 || span < max(t.srtt, d.baseRTT) || span <= 0 {
 		return
 	}
-	d.peaks[d.round%len(d.peaks)] = float64(d.bytes) / span.Seconds()
-	d.round = (d.round + 1) % len(d.peaks)
-	d.rate = 0
-	for _, sample := range d.peaks {
-		d.rate = math.Max(d.rate, sample)
+	if d.epochBacklogged || d.rate == 0 {
+		d.peaks[d.round%len(d.peaks)] = float64(d.bytes) / span.Seconds()
+		d.round = (d.round + 1) % len(d.peaks)
+		d.rate = 0
+		for _, sample := range d.peaks {
+			d.rate = math.Max(d.rate, sample)
+		}
+	} else {
+		d.appLimitedEpochs++
 	}
+	if total := d.epochOriginal + d.epochRetry; total > 0 {
+		d.repairFraction = float64(d.epochRetry) / float64(total)
+	}
+	d.epochOriginal, d.epochRetry = 0, 0
 	if d.packets > 0 {
 		d.average = float64(d.bytes) / float64(d.packets)
 	}
-	d.bytes, d.packets, d.epoch = 0, 0, now
+	d.bytes, d.packets, d.epoch, d.epochBacklogged = 0, 0, now, false
 	if d.average <= 0 || now.Sub(d.lastAdjust) < max(t.srtt, d.baseRTT) {
 		return
 	}
@@ -119,7 +144,13 @@ func (t *bipTuner) onDelivered(bytes, packets int, backlogged bool, now time.Tim
 		}
 		// Probe from observed delivery and current capacity, never a fixed
 		// hundreds-of-packets floor. Application-limited ACKs do not probe.
-		target := math.Min(math.Max(1, bdp*1.5), t.cwnd*1.25)
+		// A rate limited by our own small flight is not a lower path-capacity
+		// measurement. With fresh low-queue delivery, gently probe beyond it.
+		// Heavy repairs instead bound growth against a loss-only policer.
+		target := math.Min(math.Max(t.cwnd+math.Max(1, t.cwnd/64), bdp*1.5), t.cwnd*1.25)
+		if d.repairFraction > .15 {
+			target = math.Max(1, math.Min(t.cwnd*.9, bdp*1.5))
+		}
 		t.cwnd = math.Min(float64(t.maxWindow), target)
 		t.threshold = math.Min(float64(t.maxWindow), math.Max(1, bdp*1.5))
 		t.credit = math.Min(t.credit, float64(t.burst()))

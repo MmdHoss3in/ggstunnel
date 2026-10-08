@@ -16,6 +16,7 @@ class OpaqueManagerTests(unittest.TestCase):
         for profile in ('tcp', 'udp', 'icmp', 'gre', 'ipip', 'dcpi'):
             c = self.config(profile=profile)
             c['transport']['wire_mode'] = 'opaque'
+            c['transport'].pop('opaque_session', None)  # Explicit RC4/GGS4 compatibility.
             token = m.encode_join(c)
             self.assertTrue(token.startswith('GGS4.'))
             peer = m.decode_join(token)
@@ -33,6 +34,7 @@ class OpaqueManagerTests(unittest.TestCase):
             m.configure_opaque('ggs01')
         saved = json.loads(m.confpath('ggs01').read_text())
         self.assertEqual(saved['transport']['wire_mode'], 'opaque')
+        self.assertEqual(saved['transport']['opaque_session'], 'challenge')
         self.assertFalse(self.running)
         self.running.add('ggs01'); self.fail_restart = True
         with patch.object(m, 'ask', return_value='legacy'), patch.object(m, 'run', self.fake_run), patch.object(m, 'wait_service', lambda n: None), self.assertRaises(RuntimeError):

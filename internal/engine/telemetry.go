@@ -57,6 +57,9 @@ func (e *Engine) SnapshotTelemetry(now time.Time) Telemetry {
 	}
 	if c, ok := e.carrier.(carrier.Statser); ok {
 		v := c.SnapshotStats()
+		if e.cfg.Profile != "bip" {
+			v.PeerAuthenticated, v.PeerSilenceMS = s.PeerAuthenticated, s.PeerSilenceMS
+		}
 		s.Carrier = &v
 	}
 	if c, ok := e.carrier.(interface{ SnapshotTuner() carrier.TunerSnapshot }); ok {

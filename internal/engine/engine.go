@@ -62,6 +62,9 @@ func New(c *config.Config) (*Engine, error) {
 	co, err := frame.NewCodec(c.PSK)
 	if c.Transport.WireMode == "opaque" {
 		co, err = frame.NewOpaqueCodec(c.PSK)
+		if c.Transport.OpaqueSession == "challenge" {
+			co, err = frame.NewBoundOpaqueCodec(c.PSK)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -110,7 +113,7 @@ func (e *Engine) Run(ctx context.Context) error {
 // Key lifetime exhaustion always requires a new sender key. BIP also recovers
 // bounded delivery/session rotation failures; unexpected errors remain fatal.
 func (e *Engine) recoverable(err error) bool {
-	return errors.Is(err, frame.ErrKeyLifetime) || (e.cfg.Profile == "bip" &&
+	return errors.Is(err, frame.ErrKeyLifetime) || (e.cfg.Transport.OpaqueSession == "challenge" && errors.Is(err, session.ErrRotationLimit)) || (e.cfg.Profile == "bip" &&
 		(errors.Is(err, carrier.ErrBIPDeliveryTimeout) || errors.Is(err, carrier.ErrBIPPeerUnresponsive) || errors.Is(err, carrier.ErrBIPHandshakeTimeout) || errors.Is(err, session.ErrRotationLimit)))
 }
 
@@ -173,12 +176,12 @@ func (e *Engine) runOnce(ctx context.Context) error {
 func (e *Engine) runWorkers(parent context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	var wg sync.WaitGroup
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	launch := func(f func(context.Context) error) { wg.Add(1); go func() { defer wg.Done(); errCh <- f(ctx) }() }
 	launch(e.tunToCarrier)
 	launch(e.carrierToTun)
-	wg.Add(3)
-	go func() { defer wg.Done(); e.heartbeatLoop(ctx) }()
+	launch(e.heartbeatLoop)
+	wg.Add(2)
 	go func() { defer wg.Done(); e.statsLoop(ctx) }()
 	go func() {
 		defer wg.Done()
@@ -237,6 +240,28 @@ func (e *Engine) tunToCarrier(ctx context.Context) error {
 }
 
 func (e *Engine) sendPacket(ctx context.Context, pkt []byte) error {
+	if e.cfg.Transport.OpaqueSession == "challenge" && e.codec.RotationDue() {
+		return frame.ErrKeyLifetime
+	}
+	if e.cfg.Transport.OpaqueSession == "challenge" {
+		peer := e.carrier.(interface{ PeerSession() uint64 })
+		id := peer.PeerSession()
+		if id == 0 {
+			tick := time.NewTicker(10 * time.Millisecond)
+			defer tick.Stop()
+			for id == 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-tick.C:
+					id = peer.PeerSession()
+				}
+			}
+		}
+		if err := e.codec.BindSendPeer(id); err != nil {
+			return err
+		}
+	}
 	pid := e.codec.NextPacketID()
 	maxp := e.cfg.Performance.MaxFramePayload
 	cnt := (len(pkt) + maxp - 1) / maxp
@@ -332,20 +357,35 @@ func (e *Engine) carrierToTun(ctx context.Context) error {
 	}
 }
 
-func (e *Engine) heartbeatLoop(ctx context.Context) {
+func (e *Engine) heartbeatLoop(ctx context.Context) error {
 	t := time.NewTicker(e.cfg.Heartbeat())
 	defer t.Stop()
 	for {
 		select {
 		case <-t.C:
+			if e.cfg.Transport.OpaqueSession == "challenge" && e.codec.RotationDue() {
+				return frame.ErrKeyLifetime
+			}
+			if e.cfg.Transport.OpaqueSession == "challenge" {
+				id := e.carrier.(interface{ PeerSession() uint64 }).PeerSession()
+				if id == 0 {
+					continue
+				}
+				if err := e.codec.BindSendPeer(id); err != nil {
+					return err
+				}
+			}
 			w, err := e.codec.Seal(frame.TypeHeartbeat, 0, 0, 1, nil)
+			if errors.Is(err, frame.ErrKeyLifetime) {
+				return err
+			}
 			if err == nil {
-				if err := e.carrier.Send(w); err != nil {
+				if err := e.carrier.Send(w); err != nil && !errors.Is(err, carrier.ErrPeerNotReady) {
 					e.drops.Add(1)
 				}
 			}
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		}
 	}
 }
