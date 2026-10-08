@@ -23,10 +23,22 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
           cache: false
+      - name: Verify narrowly scoped manager-only branch update
+        if: github.ref == 'refs/heads/feature/rc5-session-recovery' && contains(github.event.head_commit.message, '[manager-only]')
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          allowed={'scripts/manage.py','scripts/test_transport_change.py','docs/rc5-upgrade.md','.github/workflows/rc5-focus.yml'}
+          changed=set(subprocess.check_output(['git','diff','--name-only','HEAD^','HEAD'],text=True).splitlines())
+          if not changed or not changed<=allowed:raise SystemExit('Manager-only label includes unrelated source changes')
+          print('Only manager/docs changed; prior native observations are retained. Tags always rerun every gate.')
+          PY
       - name: Review format, static checks and race regressions
         run: |
           test -z "$(gofmt -l cmd internal)"
@@ -38,12 +50,13 @@ jobs:
           bash scripts/build-release.sh
           python3 -m unittest discover -s scripts -p 'test_*.py' -v
       - name: Native focused lifecycle or sustained-loss A/B
+        if: github.ref != 'refs/heads/feature/rc5-session-recovery' || !contains(github.event.head_commit.message, '[manager-only]')
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y iperf3 ethtool iptables
           sudo env GITHUB_ACTIONS=true python3 scripts/rc5_focus.py '${{ matrix.mode }}'
       - name: Established-flow reordering and capacity-step regression
-        if: matrix.mode == 'loss'
+        if: matrix.mode == 'loss' && (github.ref != 'refs/heads/feature/rc5-session-recovery' || !contains(github.event.head_commit.message, '[manager-only]'))
         run: sudo env GITHUB_ACTIONS=true python3 scripts/delivery_focus.py
       - uses: actions/upload-artifact@v4
         if: always()

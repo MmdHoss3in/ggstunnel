@@ -23,6 +23,9 @@ is retained; encrypted control frames, timing and the IP protocol remain visible
 For an existing non-BIP instance, upgrade BOTH endpoints first. In Iran use
 option **23**, select opaque, and obtain the new SECRET GGS5 code. On the foreign
 server use option **2** and **REPLACE** with the same instance name and this code.
+REPLACE keeps that endpoint's existing custom TUN addresses, routes and forwards;
+it does not renumber an existing inner network. For a fresh instance with custom
+inner addresses, configure the matching addresses on both peers explicitly.
 Switching only one side interrupts traffic. Verify actual authenticated peer
 health and option **24** before sending users through it. Options **14/15** test
 useful capacity. Do not publish or share the SECRET join code.

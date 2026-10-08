@@ -261,7 +261,12 @@ def join_client():
     c['real']['listen_addr'] = f"{c['real']['local_ip']}:{c['transport']['l4_port']}"
     if c['tun']['name'] in configs():
         if ask('Tunnel exists. Type REPLACE to update it') != 'REPLACE': return
-        c['forwards'] = configs()[c['tun']['name']].get('forwards', [])
+        previous = configs()[c['tun']['name']]
+        c['forwards'] = previous.get('forwards', [])
+        # Join codes describe carrier changes, not a request to renumber a
+        # working inner network. Keep local custom addresses/routes on update.
+        for key in ('local_addr','remote_addr','routes'):
+            if key in previous.get('tun',{}):c['tun'][key] = previous['tun'][key]
         save_config(c, True)
     else: save_config(c)
     print('Allow the selected transport from Iran in the host/provider firewall.')

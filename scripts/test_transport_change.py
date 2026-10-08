@@ -69,3 +69,23 @@ class TransportChangeTests(unittest.TestCase):
                 self.assertEqual(m.peer_health('ggs01'),'WAITING FOR AUTHENTICATED PEER')
             m.atomic(self.root/'ggs01.json',json.dumps(dict(profile='dcpi',peer_authenticated=True,peer_silence_ms=91000)))
             self.assertEqual(m.peer_health('ggs01'),'NO PEER RESPONSE')
+
+    def test_foreign_replace_preserves_custom_inner_network_and_forwards(self):
+        server=self.config(profile='udp')
+        server['transport'].update(wire_mode='opaque',opaque_session='challenge')
+        old=m.decode_join(m.encode_join(server))
+        old['tun'].update(local_addr='10.123.1.2',remote_addr='10.123.1.1',routes=['10.124.0.0/16'])
+        old['forwards']=[dict(protocol='tcp',listen='0.0.0.0:25444',target='10.123.1.1:443')]
+        m.atomic(m.confpath('ggs01'),json.dumps(old))
+        server['profile']='dcpi'
+        server['tun']['mtu']=1300
+        token=m.encode_join(server)
+        with patch.object(m.getpass,'getpass',return_value=token),patch.object(m,'ask',return_value='REPLACE'),patch.object(m,'local_route',return_value=old['real']['local_ip']),patch.object(m,'run',self.fake_run),patch.object(m,'wait_service',lambda n:None):
+            m.join_client()
+        saved=json.loads(m.confpath('ggs01').read_text())
+        for key in ('local_addr','remote_addr','routes'):self.assertEqual(saved['tun'][key],old['tun'][key])
+        self.assertEqual(saved['forwards'],old['forwards'])
+        self.assertEqual(saved['profile'],'dcpi')
+        self.assertEqual(saved['transport']['opaque_session'],'challenge')
+        self.assertEqual(saved['tun']['mtu'],1300)
+        self.assertFalse(self.running)
