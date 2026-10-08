@@ -14,6 +14,9 @@ concurrency:
   group: linux-validation-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  rc5-validation:
+    if: startsWith(github.ref, 'refs/tags/v') || github.head_ref == 'feature/rc5-session-recovery'
+    uses: ./.github/workflows/rc5-focus.yml
   retry-validation:
     if: startsWith(github.ref, 'refs/tags/v') || github.head_ref == 'feature/compact-wire'
     uses: ./.github/workflows/retry-diagnosis.yml
@@ -126,7 +129,7 @@ jobs:
           path: extended-results/
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [validate, platform-smoke, extended-validation, field-performance-validation, transport-validation, retry-validation]
+    needs: [validate, platform-smoke, extended-validation, field-performance-validation, transport-validation, retry-validation, rc5-validation]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -152,6 +155,10 @@ jobs:
         with:
           pattern: retry-diagnosis-*
           path: retry-collected
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rc5-focus-*
+          path: rc5-collected
       - name: Publish tested version
         env:
           GH_TOKEN: ${{ github.token }}
@@ -161,6 +168,7 @@ jobs:
           tar -czf artifacts/field-performance-results.tar.gz -C field-collected .
           tar -czf artifacts/transport-validation-results.tar.gz -C transport-collected .
           tar -czf artifacts/retry-validation-results.tar.gz -C retry-collected .
+          tar -czf artifacts/rc5-validation-results.tar.gz -C rc5-collected .
           flags=(--latest)
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl artifacts/recovery-results.jsonl artifacts/extended-summary.json artifacts/extended-report.md artifacts/field-performance-results.tar.gz artifacts/transport-validation-results.tar.gz artifacts/retry-validation-results.tar.gz --verify-tag "${flags[@]}" --title "ggstunnel $GITHUB_REF_NAME" --notes-file artifacts/release-notes.md
+          gh release create "$GITHUB_REF_NAME" artifacts/ggstunnel-linux.tar.gz artifacts/SHA256SUMS artifacts/network-results.jsonl artifacts/recovery-results.jsonl artifacts/extended-summary.json artifacts/extended-report.md artifacts/field-performance-results.tar.gz artifacts/transport-validation-results.tar.gz artifacts/retry-validation-results.tar.gz artifacts/rc5-validation-results.tar.gz --verify-tag "${flags[@]}" --title "ggstunnel $GITHUB_REF_NAME" --notes-file artifacts/release-notes.md

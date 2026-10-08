@@ -107,4 +107,6 @@ notes+='| Arch | Recipe | Loss | Direction | Received Mbps | Status |\n|---|---|
 for r in candidate:
     if r['kind']=='controller':
         notes+=f"| {r['architecture']} | {r['recipe']} | {r['loss']} | {'reverse' if r['reverse'] else 'forward'} | {r.get('received_mbps','n/a')} | {r['status']} |\n"
+from rc5_report import report as rc5_report
+notes += rc5_report(root/'rc5-collected', os.environ['GITHUB_SHA'])
 (root/'artifacts/release-notes.md').write_text(notes)

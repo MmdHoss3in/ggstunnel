@@ -47,6 +47,13 @@ func (t *bipTuner) onSend(size int, retry bool, now time.Time) {
 		t.delivery.epochRetry++
 		return
 	}
+	d := &t.delivery
+	if d.flightBytes == 0 && !d.lastProgress.IsZero() && now.Sub(d.lastProgress) > max(t.srtt, d.baseRTT)*4 {
+		// Only a new original burst after an empty flight proves application
+		// idle. A sparse ACK during stalled repair must retain queue evidence.
+		d.epoch, d.bytes, d.packets, d.epochBacklogged = now, 0, 0, false
+		d.epochOriginal, d.epochRetry = 0, 0
+	}
 	t.delivery.epochOriginal++
 	t.delivery.flightBytes += uint64(max(0, size))
 	if t.delivery.epoch.IsZero() {
@@ -77,13 +84,6 @@ func (t *bipTuner) onDelivered(bytes, packets int, backlogged bool, now time.Tim
 		return
 	}
 	d := &t.delivery
-	if !d.lastProgress.IsZero() && now.Sub(d.lastProgress) > max(t.srtt, d.baseRTT)*4 {
-		// Do not amortize a new burst across a previous application idle gap.
-		d.epoch = now
-		d.bytes = 0
-		d.packets = 0
-		d.epochBacklogged = false
-	}
 	d.lastProgress = now
 	d.epochBacklogged = d.epochBacklogged || backlogged
 	d.flightBytes -= min(d.flightBytes, uint64(max(0, bytes)))

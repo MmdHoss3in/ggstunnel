@@ -61,3 +61,24 @@ func TestDeliveryWorkingClockBoundsRepairDelayButStallBacksOff(t *testing.T) {
 		t.Fatal("genuine stall lost exponential backoff")
 	}
 }
+
+func TestDeliveryNewBurstDoesNotAmortizeApplicationIdle(t *testing.T) {
+	c := simConfig("server")
+	c.Tuner.Mode, c.Tuner.Algorithm = "adaptive", "delivery"
+	x := newBIPTuner(c)
+	now := time.Unix(100, 0)
+	x.srtt = 80 * time.Millisecond
+	x.delivery.baseRTT = x.srtt
+	x.onSend(1200, false, now)
+	x.onDelivered(1200, 1, false, now.Add(x.srtt))
+	initial := x.delivery.rate
+	// Retire the first measurement so the next epoch must supply a real rate.
+	x.delivery.peaks = [8]float64{}
+	x.delivery.rate = 0
+	now = now.Add(2 * time.Second)
+	x.onSend(1200, false, now)
+	x.onDelivered(1200, 1, false, now.Add(x.srtt))
+	if x.delivery.rate != initial || x.delivery.flightBytes != 0 {
+		t.Fatal("application idle diluted fresh delivery", x.delivery.rate, initial)
+	}
+}
