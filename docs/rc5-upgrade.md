@@ -1,6 +1,8 @@
 # RC5 challenge mode and transport changes
 
-Implementation candidate; publication and measured results are pending CI.
+Prerelease candidate; the downloadable package is published only after full CI.
+Final tagged measurements are attached to that release; preflight history is in
+the release notes.
 RC4/GGS4 remains the previously published opaque v1 format. Upgrading a binary
 does not silently change existing configurations. No DPI or multiday guarantee.
 

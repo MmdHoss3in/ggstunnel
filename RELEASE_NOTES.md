@@ -1,6 +1,6 @@
 # Release notes
 
-## v0.3.4-rc5 — implementation, not yet validated or published
+## v0.3.4-rc5 — prerelease candidate with challenge-bound sessions
 
 Explicit opaque challenge lifecycle (GGS5) binds data keys to sender AND receiver
 identities; GGS4/v1 remains unchanged. Add UDP/raw socket counters, accurate
@@ -9,6 +9,34 @@ TUN addresses/routes/PSK/forwards. Delivery-controller experiments preserve
 application-limited peak estimates, probe low-queue self-limited flight and
 bound repair delay only while authenticated delivery continues. No measured
 performance improvement, multiday guarantee or completed PLPMTUD is claimed yet.
+
+The [focused native run](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37853656027)
+passed all four jobs on amd64/arm64 before the final manager-only correction.
+All six challenge carriers survived ten alternating one-sided restarts and
+bidirectional TCP/UDP transfers. Generic clean TCP measured 155.680–181.925Mbps
+on 200Mbps/80ms links. These are preflight observations, not final-tag evidence;
+the tagged pipeline reruns every existing and new gate before publication.
+
+Initial [c565b4b validation](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37851224898)
+found that an idle-epoch reset could defer a fresh queue reduction. Idle is now
+recognized only at a new original burst after an empty flight; the original
+regression remains unchanged. Intermediate generic TCP capacity tests wrongly
+applied a clean-path 30Mbps floor to a 0.15% lossy outer TCP path. The clean floor
+is preserved; impaired TCP is separately measured with a connectivity floor and
+does not certify high loss throughput. An intermediate ARM A/B rate of
+102.335Mbps vs RC4 116.215Mbps failed the unchanged 90% criterion and remains
+retained. Later passing runs do not erase it or prove a statistical improvement.
+
+Option 25 and foreign REPLACE retain the existing inner addresses, routes and
+forwards. Old GGS4/v1 remains explicitly separate from GGS5. Recovery at retired
+identity/key limits can interrupt traffic; there is no seamless rekey or PFS.
+
+The final [manager and repeated race checks](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37855689206)
+passed on both architectures. An earlier ARM job exposed a temporary-port reuse
+race in the nine-peer test harness (bind: address already in use), not a runtime
+transport failure. Each test pair now has isolated loopback addresses; 50 race
+repetitions retain the original bidirectional integrity and shutdown assertions.
+This repair changes only the test and its CI invocation.
 
 ## v0.3.4-rc4 — published prerelease with retained validation history
 
