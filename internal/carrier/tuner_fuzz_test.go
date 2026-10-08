@@ -14,12 +14,17 @@ func FuzzTunerEventBounds(f *testing.F) {
 			events = events[:1024]
 		}
 		x := adaptiveTuner()
+		if len(events) > 0 && events[0]&1 != 0 {
+			x.cfg.Algorithm, x.cfg.QueueDelayMS = "delivery", 20
+		}
 		now := time.Unix(100, 0)
 		for _, e := range events {
 			now = now.Add(time.Duration(int(e)+1) * time.Millisecond)
 			switch e % 6 {
 			case 0:
+				x.onSend((int(e)+1)*1200, false, now.Add(-time.Duration(int(e)+1)*time.Millisecond))
 				x.onAck(int(e)+1, time.Duration(int(e)+1)*time.Millisecond, now)
+				x.onDelivered((int(e)+1)*1200, int(e)+1, e&1 != 0, now)
 			case 1:
 				x.onTimeout(now)
 			case 2:

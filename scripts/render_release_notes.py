@@ -84,3 +84,23 @@ if (root/'retry-collected').exists():
 else:
     raise SystemExit('Tagged repeated retry artifacts missing')
 (root/'artifacts/release-notes.md').write_text(notes)
+
+# The new candidate must carry native feature evidence as well as all old gates.
+import os
+candidate=[]
+for path in sorted((root/'transport-collected').glob('*/candidate-results.jsonl')):
+    candidate.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
+expected={(arch,trial) for arch in ('amd64','arm64') for trial in range(32)}
+if len(candidate)!=64 or {(r['architecture'],r['trial']) for r in candidate}!=expected:
+    raise SystemExit('Missing native candidate feature observations')
+for r in candidate:
+    reference=r.get('recipe') in ('ordered-loss','independent-loss')
+    if r['status'] != ('observed' if reference else 'pass') or r.get('source_commit')!=os.environ['GITHUB_SHA']:
+        raise SystemExit('Failed or wrong-source candidate feature observations')
+notes+='\n## Candidate native feature and loss-controller checks\n\n'
+notes+='64 retained amd64/arm64 cases: opaque TCP/UDP/ICMP/GRE/IPIP/DCPI in both directions, three BIP recipes at 0/1/3% loss, and local MTU 1200 with TUN MTU retained. Reference recipes are measurements, not candidate success gates. Candidate clean/1%/3% floors are 100/3/2Mbps on a 200Mbps, 80ms path, with verified concurrent progress and unchanged processes. This is not high-loss 100Mbps or multiday certification. Full observations are included in transport-validation-results.tar.gz.\n\n'
+notes+='| Arch | Recipe | Loss | Direction | Received Mbps | Status |\n|---|---|---|---|---:|---|\n'
+for r in candidate:
+    if r['kind']=='controller':
+        notes+=f"| {r['architecture']} | {r['recipe']} | {r['loss']} | {'reverse' if r['reverse'] else 'forward'} | {r.get('received_mbps','n/a')} | {r['status']} |\n"
+(root/'artifacts/release-notes.md').write_text(notes)

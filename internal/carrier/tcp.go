@@ -247,7 +247,7 @@ func (t *TCP) readLoop(ctx context.Context, c net.Conn) error {
 			return err
 		}
 		n := binary.BigEndian.Uint32(header[:])
-		if n == 0 || n > uint32(t.cfg.Performance.MaxFramePayload+60) {
+		if n == 0 || n > uint32(t.cfg.ReceiveFrameLimit()) {
 			return fmt.Errorf("invalid tcp frame size %d", n)
 		}
 		b := make([]byte, n)
@@ -336,6 +336,9 @@ func writeBuffersFull(c net.Conn, buffers net.Buffers, size int) error {
 	return nil
 }
 func (t *TCP) proof(label string, nonce []byte) []byte {
+	if t.cfg.Transport.WireMode == "opaque" {
+		label = "opaque/v1/" + label
+	}
 	h := hmac.New(sha256.New, []byte(t.cfg.PSK))
 	h.Write([]byte("ggstunnel/tcp/v2/" + label))
 	h.Write(nonce)
@@ -346,7 +349,11 @@ func (t *TCP) clientHandshake(c net.Conn) error {
 	defer c.SetDeadline(time.Time{})
 	hello := make([]byte, 36)
 	copy(hello, "GGT2")
-	if _, err := rand.Read(hello[4:]); err != nil {
+	randomPart := hello[4:]
+	if t.cfg.Transport.WireMode == "opaque" {
+		randomPart = hello
+	}
+	if _, err := rand.Read(randomPart); err != nil {
 		return err
 	}
 	if err := writeFull(c, hello); err != nil {
@@ -356,7 +363,7 @@ func (t *TCP) clientHandshake(c net.Conn) error {
 	if _, err := io.ReadFull(c, reply); err != nil {
 		return err
 	}
-	transcript := append(hello[4:], reply[:32]...)
+	transcript := append(append([]byte(nil), randomPart...), reply[:32]...)
 	if !hmac.Equal(reply[32:], t.proof("server", transcript)) {
 		return fmt.Errorf("server authentication failed")
 	}
@@ -369,14 +376,18 @@ func (t *TCP) serverHandshake(c net.Conn) error {
 	if _, err := io.ReadFull(c, hello); err != nil {
 		return err
 	}
-	if string(hello[:4]) != "GGT2" {
+	if t.cfg.Transport.WireMode != "opaque" && string(hello[:4]) != "GGT2" {
 		return fmt.Errorf("unsupported TCP handshake")
 	}
 	nonce := make([]byte, 32)
 	if _, err := rand.Read(nonce); err != nil {
 		return err
 	}
-	transcript := append(hello[4:], nonce...)
+	helloPart := hello[4:]
+	if t.cfg.Transport.WireMode == "opaque" {
+		helloPart = hello
+	}
+	transcript := append(append([]byte(nil), helloPart...), nonce...)
 	if err := writeFull(c, append(nonce, t.proof("server", transcript)...)); err != nil {
 		return err
 	}

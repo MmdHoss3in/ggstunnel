@@ -309,7 +309,7 @@ func (b *BIP) openCompact(body []byte, role, typ byte) (wirePacket, error) {
 		if padding != 0 {
 			return p, errors.New("padded compact DATA")
 		}
-		p.payload, err = compactPayload(p.payload, p.sender, p.flags&bipFlagPacked != 0, true, b.cfg.Performance.MaxFramePayload+60)
+		p.payload, err = compactPayload(p.payload, p.sender, p.flags&bipFlagPacked != 0, true, b.cfg.ReceiveFrameLimit())
 		if err != nil {
 			return p, err
 		}

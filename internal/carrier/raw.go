@@ -39,6 +39,8 @@ func NewRaw(c *config.Config, kind string) (Carrier, error) {
 		network = "ip4:47"
 	case "ipip":
 		network = "ip4:4"
+	case "dcpi":
+		network = "ip4:58"
 	default:
 		return nil, errors.New("bad raw kind")
 	}
@@ -99,7 +101,7 @@ func (r *rawCarrier) Start(ctx context.Context) error {
 // synthetic inner packet; it is never routed by the host stack.
 func (r *rawCarrier) innerIPv4(marker string, payload []byte) []byte {
 	r.innerID++
-	p := make([]byte, 20+4+len(payload))
+	p := make([]byte, 20+len(marker)+len(payload))
 	p[0] = 0x45
 	binary.BigEndian.PutUint16(p[2:4], uint16(len(p)))
 	binary.BigEndian.PutUint16(p[4:6], r.innerID)
@@ -116,33 +118,44 @@ func (r *rawCarrier) innerIPv4(marker string, payload []byte) []byte {
 	copy(p[12:16], src)
 	copy(p[16:20], dst)
 	binary.BigEndian.PutUint16(p[10:12], checksum(p[:20]))
-	copy(p[20:24], []byte(marker))
-	copy(p[24:], payload)
+	copy(p[20:], marker)
+	copy(p[20+len(marker):], payload)
 	return p
 }
 
 func unwrapInnerIPv4(b []byte, marker string) ([]byte, bool) {
-	if len(b) < 24 || b[0]>>4 != 4 {
+	if len(b) < 20+len(marker) || b[0]>>4 != 4 {
 		return nil, false
 	}
 	ihl := int(b[0]&0x0f) * 4
-	if ihl < 20 || len(b) < ihl+4 || b[9] != 253 {
+	if ihl < 20 || len(b) < ihl+len(marker) || b[9] != 253 {
 		return nil, false
 	}
 	total := int(binary.BigEndian.Uint16(b[2:4]))
 	if total != len(b) || checksum(b[:ihl]) != 0 || binary.BigEndian.Uint16(b[6:8])&0x3fff != 0 {
 		return nil, false
 	}
-	if total < ihl+4 || string(b[ihl:ihl+4]) != marker {
+	if total < ihl+len(marker) || string(b[ihl:ihl+len(marker)]) != marker {
 		return nil, false
 	}
-	return b[ihl+4 : total], true
+	return b[ihl+len(marker) : total], true
+}
+
+func (r *rawCarrier) marker(legacy string) string {
+	if r.cfg.Transport.WireMode == "opaque" {
+		return ""
+	}
+	return legacy
 }
 
 func (r *rawCarrier) wrap(b []byte) []byte {
+	if r.kind == "dcpi" {
+		return b
+	}
 	switch r.kind {
 	case "icmp":
-		p := make([]byte, 8+4+len(b))
+		marker := r.marker("IPXI")
+		p := make([]byte, 8+len(marker)+len(b))
 		typ := byte(8)
 		if r.cfg.Role == "server" {
 			typ = 0
@@ -152,36 +165,40 @@ func (r *rawCarrier) wrap(b []byte) []byte {
 		binary.BigEndian.PutUint16(p[4:6], r.icmpID)
 		r.icmpSeq++
 		binary.BigEndian.PutUint16(p[6:8], r.icmpSeq)
-		copy(p[8:12], []byte("IPXI"))
-		copy(p[12:], b)
+		copy(p[8:], marker)
+		copy(p[8+len(marker):], b)
 		binary.BigEndian.PutUint16(p[2:4], checksum(p))
 		return p
 	case "gre":
-		inner := r.innerIPv4("IPXG", b)
+		inner := r.innerIPv4(r.marker("IPXG"), b)
 		p := make([]byte, 4+len(inner))
 		binary.BigEndian.PutUint16(p[0:2], 0)      // GRE flags/version
 		binary.BigEndian.PutUint16(p[2:4], 0x0800) // inner IPv4
 		copy(p[4:], inner)
 		return p
 	case "ipip":
-		return r.innerIPv4("IPX4", b)
+		return r.innerIPv4(r.marker("IPX4"), b)
 	}
 	return b
 }
 func (r *rawCarrier) unwrap(b []byte) ([]byte, bool) {
+	if r.kind == "dcpi" {
+		return b, len(b) > 0
+	}
 	switch r.kind {
 	case "icmp":
-		if len(b) < 12 || string(b[8:12]) != "IPXI" || b[1] != byte(r.cfg.Transport.ICMPCode) || checksum(b) != 0 || (b[0] != 0 && b[0] != 8) {
+		marker := r.marker("IPXI")
+		if len(b) < 8+len(marker) || string(b[8:8+len(marker)]) != marker || b[1] != byte(r.cfg.Transport.ICMPCode) || checksum(b) != 0 || (b[0] != 0 && b[0] != 8) {
 			return nil, false
 		}
-		return b[12:], true
+		return b[8+len(marker):], true
 	case "gre":
 		if len(b) < 4 || binary.BigEndian.Uint16(b[0:2]) != 0 || binary.BigEndian.Uint16(b[2:4]) != 0x0800 {
 			return nil, false
 		}
-		return unwrapInnerIPv4(b[4:], "IPXG")
+		return unwrapInnerIPv4(b[4:], r.marker("IPXG"))
 	case "ipip":
-		return unwrapInnerIPv4(b, "IPX4")
+		return unwrapInnerIPv4(b, r.marker("IPX4"))
 	}
 	return nil, false
 }
@@ -212,7 +229,7 @@ func (r *rawCarrier) readLoopScalar(ctx context.Context) {
 		if !src.IP.Equal(r.peer.IP) {
 			continue
 		}
-		if p, ok := r.unwrap(buf[:n]); ok && len(p) > 0 && len(p) <= r.cfg.Performance.MaxFramePayload+60 {
+		if p, ok := r.unwrap(buf[:n]); ok && len(p) > 0 && len(p) <= r.cfg.ReceiveFrameLimit() {
 			cp := append([]byte(nil), p...)
 			select {
 			case r.rx <- cp:

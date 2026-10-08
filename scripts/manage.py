@@ -29,7 +29,7 @@ RUN = Path('/run/ggstunnel')
 WRAPPER = Path('/usr/local/bin/ggstunnel')
 SYSCTL_FILE = Path('/etc/sysctl.d/90-ggstunnel.conf')
 VERSION = (Path(__file__).resolve().parents[1]/'internal/version/VERSION').read_text().strip()
-PROFILES = ('bip', 'tcp', 'udp', 'icmp', 'gre', 'ipip')
+PROFILES = ('bip', 'tcp', 'udp', 'icmp', 'gre', 'ipip', 'dcpi')
 
 def run(args, check=True, timeout=90):
     p = subprocess.run([str(x) for x in args], text=True, capture_output=True, timeout=timeout)
@@ -117,14 +117,17 @@ def make_config(index, profile, server, peer, port, psk, role, local=None):
     if role not in ('client', 'server'): raise ValueError('Invalid role')
     local = ipv4(local or (peer if client else server))
     remote = server if client else peer
-    return dict(config_version=1, mode='tun', role=role, profile=profile, psk=psk,
+    c = dict(config_version=1, mode='tun', role=role, profile=profile, psk=psk,
         real=dict(local_ip=local, peer_ip=remote, listen_addr=f'{local}:{port}', peer_addr=f'{remote}:{port}'),
         tun=dict(name=f'ggs{index:02d}', local_addr=b if client else a, remote_addr=a if client else b,
                  prefix=30, mtu=1280, tx_queue_len=1024 if profile=='bip' else 256, routes=[]),
         transport=dict(l4_port=port, heartbeat_sec=2, idle_timeout_sec=30, sock_buf=4 << 20, bip_pull_burst=128, bip_max_retries=8),
         performance=dict(profile='stable', queue_size=8192, max_frame_payload=1280),
-        tuner=dict(mode='adaptive' if profile == 'bip' else 'manual', max_pps=10000, max_burst=128, unlimited_rate=True),
+        tuner=dict(algorithm='delivery', queue_delay_ms=20, mode='adaptive' if profile == 'bip' else 'manual', max_pps=10000, max_burst=128, unlimited_rate=True),
         telemetry=dict(interval_sec=2), forwards=[])
+    if profile == 'bip': c['transport']['bip_delivery'] = 'independent'
+    if profile == 'dcpi': c['transport']['wire_mode'] = 'opaque'
+    return c
 
 def encode_join(c):
     if c['role'] != 'server': raise ValueError('Generate join code on Iran')
@@ -134,25 +137,30 @@ def encode_join(c):
     # Compact is explicit on both ends; older managers must reject this code.
     compact = c['profile']=='bip' and c['transport'].get('bip_wire_mode')=='compact'
     if compact: data.update(v=3, wire='compact')
+    opaque = c['transport'].get('wire_mode') == 'opaque'
+    if opaque: data.update(v=4, wire='opaque')
     raw = json.dumps(data, sort_keys=True, separators=(',', ':')).encode()
-    return ('GGS3.' if compact else 'GGS2.') + base64.urlsafe_b64encode(raw).decode().rstrip('=') + '.' + hashlib.sha256(raw).hexdigest()[:16]
+    return ('GGS4.' if opaque else 'GGS3.' if compact else 'GGS2.') + base64.urlsafe_b64encode(raw).decode().rstrip('=') + '.' + hashlib.sha256(raw).hexdigest()[:16]
 
 def decode_join(token, local=None):
     if len(token) > 4096: raise ValueError('Join code too long')
     prefix, encoded, digest = token.strip().split('.')
-    if prefix not in ('GGS2','GGS3'): raise ValueError('Unknown join code format')
+    if prefix not in ('GGS2','GGS3','GGS4'): raise ValueError('Unknown join code format')
     raw = base64.b64decode(encoded + '=' * (-len(encoded) % 4), altchars=b'-_', validate=True)
     if not secrets.compare_digest(hashlib.sha256(raw).hexdigest()[:16], digest): raise ValueError('Join code checksum mismatch')
     d = json.loads(raw)
     fields = {'v','index','profile','server','peer','port','psk','mtu','payload'}
-    compact = prefix=='GGS3'
-    if set(d) != (fields|{'wire'} if compact else fields) or d['v'] != (3 if compact else 2):
+    compact, opaque = prefix=='GGS3', prefix=='GGS4'
+    if set(d) != (fields|{'wire'} if compact or opaque else fields) or d['v'] != (4 if opaque else 3 if compact else 2):
         raise ValueError('Unsupported join data')
     if compact and (d['profile']!='bip' or d['wire']!='compact'): raise ValueError('Unsupported compact join mode')
+    if opaque and (d['profile']=='bip' or d['wire']!='opaque'): raise ValueError('Unsupported opaque join mode')
+    if d['profile']=='dcpi' and not opaque: raise ValueError('DCPI requires GGS4 opaque join code')
     c = make_config(d['index'], d['profile'], d['server'], d['peer'], d['port'], d['psk'], 'client', local)
     c['tun']['mtu'] = integer(d['mtu'], 576, 1500)
     c['performance']['max_frame_payload'] = integer(d['payload'], 256, 1348)
     if compact: c['transport']['bip_wire_mode']='compact'
+    if opaque: c['transport']['wire_mode']='opaque'
     return c
 
 def active(name): return run(['systemctl', 'is-active', '--quiet', unit(name)], check=False).returncode == 0
@@ -181,7 +189,7 @@ def conflict(c, old_name=None):
             listening = c['profile'] == 'udp' or (c['role'] == other['role'] == 'server')
             if c['profile'] in ('tcp', 'udp') and listening and listeners_overlap(c['real']['listen_addr'], other['real']['listen_addr']):
                 raise ValueError('Transport port already allocated')
-            if c['profile'] in ('bip','icmp','gre','ipip') and c['real']['peer_ip'] == other['real']['peer_ip']:
+            if c['profile'] in ('bip','icmp','gre','ipip','dcpi') and c['real']['peer_ip'] == other['real']['peer_ip']:
                 raise ValueError('One raw tunnel per transport and public peer IP')
     binds = []
     for other in [*others.values(), c]:
@@ -230,16 +238,17 @@ def create_server():
     print('Transports: tcp / udp / bip / icmp / gre / ipip. Both peers must use compatible wire settings.')
     profile = ask('Transport', 'bip').lower()
     if profile not in PROFILES: raise ValueError('Unsupported transport')
+    if profile == 'dcpi': print('Experimental DCPI: custom IPv4 protocol 58, no TCP/UDP port, same updated version required on both peers. Reachability depends on your network.')
     server = ipv4(ask('Iran public IPv4'))
     peer = ipv4(ask('Foreign public IPv4'))
     port = integer(ask('Tunnel transport port (TCP/UDP)', str(24000+index)), 1024,65535) if profile in ('tcp','udp') else 24000+index
     c = make_config(index, profile, server, peer, port, secrets.token_hex(32), 'server')
     save_config(c)
     print('Copy this SECRET join code to the foreign server (contains PSK):\n' + encode_join(c))
-    print('Allow inbound', f'{profile.upper()} {port}' if profile in ('tcp','udp') else ({'gre':'IPv4 protocol 47','ipip':'IPv4 protocol 4'}.get(profile,'ICMP')), 'from', peer, 'in your firewall.')
+    print('Allow inbound', f'{profile.upper()} {port}' if profile in ('tcp','udp') else ({'gre':'IPv4 protocol 47','ipip':'IPv4 protocol 4','dcpi':'IPv4 protocol 58 (custom DCPI)'}.get(profile,'ICMP')), 'from', peer, 'in your firewall.')
 
 def join_client():
-    token = getpass.getpass('Paste SECRET GGS2/GGS3 join code (hidden): ').strip()
+    token = getpass.getpass('Paste SECRET GGS2/GGS3/GGS4 join code (hidden): ').strip()
     c = decode_join(token)
     c['real']['local_ip'] = local_route(c['real']['peer_ip'])
     c['real']['listen_addr'] = f"{c['real']['local_ip']}:{c['transport']['l4_port']}"
@@ -258,9 +267,10 @@ def peer_health(name, interval=2):
         path = RUN/(name+'.json')
         if time.time()-path.stat().st_mtime > max(15,3*interval): return 'STALE TELEMETRY'
         stats = json.loads(path.read_text())
-        carrier = stats.get('carrier',{})
+        carrier = stats.get('carrier',stats)
         if not isinstance(carrier,dict): return 'HEALTH UNKNOWN'
         if carrier.get('path_suspended') is True: return 'NO PEER RESPONSE'
+        if carrier.get('peer_silence_ms',0)>90000: return 'NO PEER RESPONSE'
         if carrier.get('peer_authenticated') is False: return 'HANDSHAKING'
         if carrier.get('peer_authenticated') is True: return 'PEER RESPONDING'
     except (OSError,ValueError,AttributeError): pass
@@ -271,7 +281,7 @@ def status():
     for name,c in entries.items():
         p = run(['systemctl','is-enabled',unit(name)],check=False)
         running = active(name)
-        health = peer_health(name,c.get('telemetry',{}).get('interval_sec',2)) if running and c['profile']=='bip' else ''
+        health = peer_health(name,c.get('telemetry',{}).get('interval_sec',2)) if running else ''
         print(name, c['role'], c['profile'], c['tun']['local_addr'], '<->', c['tun']['remote_addr'],
               'RUNNING' if running else 'STOPPED', p.stdout.strip(), health)
     if not entries: print('No valid configured tunnels')
@@ -588,12 +598,12 @@ def ask(label,default=''):
 
 def menu():
     while True:
-        print('\nGGSTUNNEL '+VERSION+'\n1 Create Iran tunnel  2 Join from foreign  3 Status\n4 Start temporarily  5 Stop temporarily  6 Restart\n7 ON + boot enable  8 OFF + boot disable  9 Edit / forwards / restore config\n10 Delete tunnel  11 Show join code  12 Logs  13 Diagnostic report\n14 Capacity listener  15 Capacity test  16 Apply network tuning\n17 Restore tuning  18 Update from extracted package  19 Rollback release\n20 Sustained capacity test (10 minutes each direction/protocol)\n21 Apply BIP performance defaults to existing tunnels\n22 Experimental BIP wire mode / payload\n0 Exit\nActions 4-8 accept tunnel name or all. Temporary stop lasts until manual start or reboot.')
+        print('\nGGSTUNNEL '+VERSION+'\n1 Create Iran tunnel  2 Join from foreign  3 Status\n4 Start temporarily  5 Stop temporarily  6 Restart\n7 ON + boot enable  8 OFF + boot disable  9 Edit / forwards / restore config\n10 Delete tunnel  11 Show join code  12 Logs  13 Diagnostic report\n14 Capacity listener  15 Capacity test  16 Apply network tuning\n17 Restore tuning  18 Update from extracted package  19 Rollback release\n20 Sustained capacity test (10 minutes each direction/protocol)\n21 Apply BIP performance defaults to existing tunnels\n22 Experimental BIP wire mode / payload\n23 Experimental non-BIP opaque format\n24 Short TUN path / size diagnostic\n0 Exit\nActions 4-8 accept tunnel name or all. Temporary stop lasts until manual start or reboot.')
         try: choice=ask('Choice')
         except (EOFError, KeyboardInterrupt): print(); return
         if choice=='0':return
         try:
-            with (locked() if choice not in ('3','12','13','14','15','20') else contextlib.nullcontext()):
+            with (locked() if choice not in ('3','12','13','14','15','20','24') else contextlib.nullcontext()):
                 if choice=='1':create_server()
                 elif choice=='2':join_client()
                 elif choice=='3':status()
@@ -613,6 +623,8 @@ def menu():
                 elif choice=='19':rollback();return
                 elif choice=='21':optimize_existing()
                 elif choice=='22':configure_wire(select_name())
+                elif choice=='23':configure_opaque(select_name())
+                elif choice=='24':path_test(select_name())
                 elif choice=='20':capacity(select_name(),'client',(integer(ask('Rate Mbps','100'),1,1000),),600)
                 else: raise ValueError('Unknown menu option')
             if choice == '18':
@@ -636,11 +648,44 @@ def configure_wire(name):
     save_config(c,True)
     if c['role']=='server':print('Replace the foreign config with this SECRET join code:\n'+encode_join(c))
 
+def configure_opaque(name):
+    c=configs()[name]
+    if c['profile']=='bip':raise ValueError('Use option 22 for BIP compact')
+    print('Opaque requires updated peers with identical wire settings. Switching one side interrupts traffic; config rollback is available in option 9.')
+    mode=ask('Wire mode: legacy / opaque',c['transport'].get('wire_mode') or 'legacy')
+    if mode not in ('legacy','opaque'):raise ValueError('Unknown wire mode')
+    if c['profile']=='dcpi' and mode!='opaque':raise ValueError('DCPI requires opaque')
+    if mode=='opaque':c['transport']['wire_mode']='opaque'
+    else:c['transport'].pop('wire_mode',None)
+    save_config(c,True)
+    if c['role']=='server':print('Replace the foreign config with this SECRET join code:\n'+encode_join(c))
+
+def path_test(name):
+    c=configs()[name]
+    if not active(name):raise ValueError('Start this tunnel before testing its path')
+    print('Running TUN path test; no carrier/firewall/config changes. A failed ping alone cannot identify a firewall or MTU problem.')
+    args=['ping','-I',c['tun']['name'],'-c','3','-W','2']
+    ipv6=ipaddress.ip_address(c['tun']['remote_addr']).version==6
+    if ipv6:args+=['-6']
+    sizes=sorted({64,min(1000,c['tun']['mtu']),c['tun']['mtu']})
+    for size in sizes:
+        overhead=48 if ipv6 else 28
+        result=run(args+['-M','do','-s',str(max(0,size-overhead)),c['tun']['remote_addr']],check=False,timeout=12)
+        print(f'Inner packet {size} bytes: '+('PASS' if result.returncode==0 else 'NO CONFIRMATION'))
+        print((result.stdout+result.stderr).strip())
+    try:
+        stats=json.loads((RUN/(name+'.json')).read_text())
+        print('Telemetry freshness: '+peer_health(name,c.get('telemetry',{}).get('interval_sec',2)))
+        print(json.dumps({k:stats.get(k) for k in ('profile','carrier','tuner','enqueue_drops','tun_queue_drops','authentication_failures')},indent=2))
+    except (OSError,ValueError):print('Telemetry unavailable; inspect option 13.')
+    print('For useful throughput run capacity listener option 14 on the peer, then option 15 here. This short test cannot certify long-term stability.')
+
 def optimize_existing():
     for c in configs().values():
         if c['profile']!='bip':continue
         c['tuner']=dict(c.get('tuner') or {})
-        c['tuner'].update(mode='adaptive',unlimited_rate=True,max_burst=128)
+        c['tuner'].update(mode='adaptive',algorithm='delivery',queue_delay_ms=20,unlimited_rate=True,max_burst=128)
+        c['transport']['bip_delivery']='independent'
         c.setdefault('transport',{}).update(bip_pull_burst=128,bip_max_retries=8)
         c['transport']['sock_buf']=max(4<<20,c['transport'].get('sock_buf') or 4<<20)
         c['performance']['queue_size']=max(8192,c['performance'].get('queue_size') or 8192)

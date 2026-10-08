@@ -14,22 +14,25 @@ import (
 )
 
 type Config struct {
-	Forwards      []forward.Rule    `json:"forwards,omitempty"`
-	Tuner         TunerConfig       `json:"tuner"`
-	Telemetry     TelemetryConfig   `json:"telemetry"`
-	Mode          string            `json:"mode"`
-	ConfigVersion int               `json:"config_version"`
-	Role          string            `json:"role"`
-	Profile       string            `json:"profile"`
-	PSK           string            `json:"psk"`
-	Real          RealConfig        `json:"real"`
-	TUN           TUNConfig         `json:"tun"`
-	Transport     TransportConfig   `json:"transport"`
-	Performance   PerformanceConfig `json:"performance"`
-	LogLevel      string            `json:"log_level"`
+	receiveFrameLimit int
+	Forwards          []forward.Rule    `json:"forwards,omitempty"`
+	Tuner             TunerConfig       `json:"tuner"`
+	Telemetry         TelemetryConfig   `json:"telemetry"`
+	Mode              string            `json:"mode"`
+	ConfigVersion     int               `json:"config_version"`
+	Role              string            `json:"role"`
+	Profile           string            `json:"profile"`
+	PSK               string            `json:"psk"`
+	Real              RealConfig        `json:"real"`
+	TUN               TUNConfig         `json:"tun"`
+	Transport         TransportConfig   `json:"transport"`
+	Performance       PerformanceConfig `json:"performance"`
+	LogLevel          string            `json:"log_level"`
 }
 
 type TunerConfig struct {
+	Algorithm     string `json:"algorithm,omitempty"`
+	QueueDelayMS  int    `json:"queue_delay_ms,omitempty"`
 	UnlimitedRate bool   `json:"unlimited_rate,omitempty"`
 	Mode          string `json:"mode"`
 	MinRTOMS      int    `json:"min_rto_ms"`
@@ -85,6 +88,8 @@ type TransportConfig struct {
 	BIPDeadTimeoutSec      int    `json:"bip_dead_timeout_sec"`
 	BIPHandshakeTimeoutSec int    `json:"bip_handshake_timeout_sec"`
 	BIPWireMode            string `json:"bip_wire_mode,omitempty"`
+	BIPDelivery            string `json:"bip_delivery,omitempty"`
+	WireMode               string `json:"wire_mode,omitempty"`
 }
 
 type PerformanceConfig struct {
@@ -115,6 +120,18 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) ApplyDefaults() {
+	if c.Tuner.Algorithm == "" {
+		c.Tuner.Algorithm = "delivery"
+	}
+	if c.Tuner.QueueDelayMS == 0 {
+		c.Tuner.QueueDelayMS = 20
+	}
+	if c.Transport.BIPDelivery == "" {
+		c.Transport.BIPDelivery = "ordered"
+	}
+	if c.Profile == "dcpi" && c.Transport.WireMode == "" {
+		c.Transport.WireMode = "opaque"
+	}
 	if c.Tuner.Mode == "" {
 		c.Tuner.Mode = "manual"
 	}
@@ -268,6 +285,27 @@ func (c *Config) ApplyDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if c.Tuner.Algorithm != "" && c.Tuner.Algorithm != "loss" && c.Tuner.Algorithm != "delivery" {
+		return errors.New("tuner.algorithm must be loss or delivery")
+	}
+	if c.Tuner.QueueDelayMS < 0 || c.Tuner.QueueDelayMS > 1000 {
+		return errors.New("tuner.queue_delay_ms must be 0..1000")
+	}
+	if c.Transport.BIPDelivery != "" && c.Transport.BIPDelivery != "ordered" && c.Transport.BIPDelivery != "independent" {
+		return errors.New("transport.bip_delivery must be ordered or independent")
+	}
+	if c.Profile != "bip" && c.Transport.BIPDelivery == "independent" {
+		return errors.New("independent BIP delivery requires profile bip")
+	}
+	if c.Transport.WireMode != "" && c.Transport.WireMode != "legacy" && c.Transport.WireMode != "opaque" {
+		return errors.New("transport.wire_mode must be legacy or opaque")
+	}
+	if c.Profile == "bip" && c.Transport.WireMode == "opaque" {
+		return errors.New("BIP uses bip_wire_mode=compact rather than wire_mode=opaque")
+	}
+	if c.Profile == "dcpi" && c.Transport.WireMode != "opaque" {
+		return errors.New("experimental DCPI requires wire_mode=opaque on both peers")
+	}
 	if c.Profile != "bip" && c.Transport.BIPWireMode == "compact" {
 		return errors.New("compact wire currently requires profile bip")
 	}
@@ -320,7 +358,7 @@ func (c *Config) Validate() error {
 		return errors.New("role must be server or client")
 	}
 	switch c.Profile {
-	case "tcp", "udp", "icmp", "gre", "ipip", "bip":
+	case "tcp", "udp", "icmp", "gre", "ipip", "bip", "dcpi":
 	default:
 		return fmt.Errorf("unsupported profile %q", c.Profile)
 	}
@@ -414,7 +452,7 @@ func (c *Config) Validate() error {
 	if c.Profile == "udp" && (c.Real.ListenAddr == "" || c.Real.PeerAddr == "") {
 		return errors.New("UDP requires fixed listen_addr and peer_addr on both sides")
 	}
-	if c.Profile == "icmp" || c.Profile == "gre" || c.Profile == "ipip" {
+	if c.Profile == "icmp" || c.Profile == "gre" || c.Profile == "ipip" || c.Profile == "dcpi" {
 		if net.ParseIP(c.Real.LocalIP).To4() == nil || net.ParseIP(c.Real.PeerIP).To4() == nil {
 			return errors.New("raw transport requires IPv4 outer addresses")
 		}

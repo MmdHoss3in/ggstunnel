@@ -47,15 +47,17 @@ type Decoded struct {
 }
 
 type Codec struct {
-	master      []byte
-	receiverID  uint64
-	receiver    cipher.AEAD
-	aead        cipher.AEAD
-	sessionID   uint64
-	seq         atomic.Uint64
-	packetID    atomic.Uint32
-	replay      *ReplayGuard
-	peerSession uint64
+	master       []byte
+	receiverID   uint64
+	receiver     cipher.AEAD
+	aead         cipher.AEAD
+	sessionID    uint64
+	seq          atomic.Uint64
+	packetID     atomic.Uint32
+	replay       *ReplayGuard
+	peerSession  uint64
+	replayWindow uint64
+	opaque       *opaqueState
 }
 
 func NewCodec(psk string) (*Codec, error) {
@@ -70,7 +72,7 @@ func NewCodec(psk string) (*Codec, error) {
 	if _, err := rand.Read(sid[:]); err != nil {
 		return nil, err
 	}
-	c := &Codec{master: master, sessionID: binary.BigEndian.Uint64(sid[:]), replay: NewReplayGuard(4096)}
+	c := &Codec{master: master, sessionID: binary.BigEndian.Uint64(sid[:]), replay: NewReplayGuard(4096), replayWindow: 4096}
 	if c.sessionID == 0 {
 		c.sessionID = 1
 	}
@@ -102,6 +104,9 @@ func (c *Codec) NextPacketID() uint32 { return c.packetID.Add(1) }
 func (c *Codec) SessionID() uint64    { return c.sessionID }
 
 func (c *Codec) Seal(typ byte, packetID uint32, fragIndex, fragCount uint16, payload []byte) ([]byte, error) {
+	if c.opaque != nil {
+		return c.sealOpaque(typ, packetID, fragIndex, fragCount, payload)
+	}
 	if (typ != TypeData && typ != TypeHeartbeat) || fragCount == 0 || fragCount > 128 || fragIndex >= fragCount || len(payload) > 65535 {
 		return nil, ErrMalformed
 	}
@@ -124,6 +129,9 @@ func (c *Codec) Seal(typ byte, packetID uint32, fragIndex, fragCount uint16, pay
 }
 
 func (c *Codec) Open(b []byte) (*Decoded, error) {
+	if c.opaque != nil {
+		return c.openOpaque(b)
+	}
 	if len(b) < HeaderLen+NonceLen+c.aead.Overhead() {
 		return nil, fmt.Errorf("%w: frame too short", ErrMalformed)
 	}
@@ -164,11 +172,14 @@ func (c *Codec) OpenForSession(b []byte, sid uint64) (*Decoded, error) {
 		return nil, ErrAuthentication
 	}
 	got, ok := PeekSessionID(b)
+	if c.opaque != nil {
+		got, ok = c.opaqueSession(b)
+	}
 	if !ok || got != sid {
 		return nil, ErrAuthentication
 	}
 	if c.peerSession != sid {
-		c.replay = NewReplayGuard(4096)
+		c.replay = NewReplayGuard(c.replayWindow)
 		c.peerSession = sid
 	}
 	return c.Open(b)

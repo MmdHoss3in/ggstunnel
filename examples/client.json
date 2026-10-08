@@ -40,7 +40,8 @@
     "bip_rto_ms": 250,
     "bip_max_retries": 8,
     "icmp_type": 8,
-    "icmp_code": 0
+    "icmp_code": 0,
+    "bip_delivery": "independent"
   },
   "performance": {
     "profile": "stable",
@@ -54,7 +55,9 @@
     "max_rto_ms": 10000,
     "max_pps": 10000,
     "max_burst": 128,
-    "unlimited_rate": true
+    "unlimited_rate": true,
+    "algorithm": "delivery",
+    "queue_delay_ms": 20
   },
   "telemetry": {
     "interval_sec": 5

@@ -100,7 +100,7 @@ func (u *UDP) readLoopScalar(ctx context.Context) {
 				return
 			}
 		}
-		if !src.IP.Equal(u.peer.IP) || src.Port != u.peer.Port || n > u.cfg.Performance.MaxFramePayload+60 {
+		if !src.IP.Equal(u.peer.IP) || src.Port != u.peer.Port || n > u.cfg.ReceiveFrameLimit() {
 			continue
 		}
 		b := append([]byte(nil), buf[:n]...)

@@ -53,6 +53,7 @@ jobs:
           go test ./internal/carrier -run '^$' -fuzz '^FuzzTunerEventBounds$' -fuzztime 50000x -fuzzminimizetime 1000x -timeout 2m
           go test ./internal/carrier -run '^$' -fuzz '^FuzzPackedFrameBounds$' -fuzztime 500000x -fuzzminimizetime 1000x -timeout 2m
           go test ./internal/frame -run '^$' -fuzz '^FuzzFrameParser$' -fuzztime 2000000x -fuzzminimizetime 1000x -timeout 2m
+          go test ./internal/frame -run '^$' -fuzz '^FuzzOpaqueParser$' -fuzztime 500000x -fuzzminimizetime 1000x -timeout 2m
       - name: Build release binaries
         run: bash scripts/build-release.sh
       - name: Manager and installer tests

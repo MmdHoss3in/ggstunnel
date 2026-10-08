@@ -627,6 +627,7 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 	defer b.ackMu.Unlock()
 	fast := false
 	clean := 0
+	deliveredBytes := 0
 	var oldest time.Time
 	var delivered []ackDelivery
 	accept := func(seq uint32) {
@@ -634,6 +635,7 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 		if p == nil {
 			return
 		}
+		deliveredBytes += len(p.item.data)
 		delivered = append(delivered, ackDelivery{seq: seq, sent: p.sent, retries: p.item.retries})
 		b.traceRecord(traceEvent{At: now, Event: "ack_accept", Seq: seq, Ack: ack, Sack: bits, Mode: p.mode, Retries: p.item.retries, AgeMS: float64(now.Sub(p.sent)) / float64(time.Millisecond)})
 		fast = fast || p.mode == pendingModeFast
@@ -686,12 +688,20 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 		}
 	}
 
-	b.detectSACKLoss(delivered, now)
+	if b.tuner == nil || b.tuner.cfg.Algorithm != "delivery" {
+		b.detectSACKLoss(delivered, now)
+	}
 	if b.tuner != nil && clean > 0 {
 		// Include the oldest clean packet's residence time in a cumulative
 		// ACK. The newest packet alone systematically hides batching delay,
 		// producing premature timeouts and repeated congestion cuts.
 		b.tuner.onAck(clean, now.Sub(oldest), now)
+	}
+	if b.tuner != nil {
+		b.tuner.onDelivered(deliveredBytes, len(delivered), b.txBacklog() > 0, now)
+		if b.tuner.cfg.Algorithm == "delivery" {
+			b.detectSACKLoss(delivered, now)
+		}
 	}
 	return fast
 }
@@ -703,6 +713,7 @@ func (b *BIP) queuePending(x outData, mode byte, now time.Time) {
 	}
 	p := &pendingData{item: x, sent: now, mode: mode, index: -1}
 	if b.tuner != nil {
+		b.tuner.onSend(len(x.data), x.retries > 0, now)
 		p.deadline = now.Add(b.tuner.timeout(x.retries))
 	} else {
 		p.deadline = now.Add(time.Duration(b.cfg.Transport.BIPRTOMS) * time.Millisecond)
@@ -1075,7 +1086,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 		parts := 1
 		if packed {
 			var valid bool
-			parts, valid = validatePacked(p.payload, b.cfg.Performance.MaxFramePayload+60)
+			parts, valid = validatePacked(p.payload, b.cfg.ReceiveFrameLimit())
 			// Active-peer authentication and local support are sufficient for RX.
 			// DATA can overtake READY; requiring a reverse capability exchange
 			// here would drop valid bundles on an asymmetric request path.
@@ -1097,7 +1108,7 @@ func (b *BIP) handle(body []byte, now time.Time) {
 			w.dirty = true
 			b.dataDuplicate.Add(1)
 		} else if sequenceDistance(w.max, p.token) <= uint32(b.window()) {
-			if !b.receiveOrderedPayload(p.token, p.payload, packed) {
+			if !b.receivePayload(p.token, p.payload, packed) {
 				b.pendingOverflow.Add(1)
 			} else {
 				if packed {
@@ -1256,7 +1267,7 @@ func (b *BIP) run(ctx context.Context) {
 			b.drainRX()
 			// Keep reporting a retained hole even if its retransmission was lost
 			// and no new data can cross the cumulative-ACK horizon.
-			if len(b.rxHold) > 0 && b.ackDue.IsZero() && now.Sub(b.lastAck) >= 100*time.Millisecond {
+			if (len(b.rxHold) > 0 || len(b.rxAck.seen) > 0) && b.ackDue.IsZero() && now.Sub(b.lastAck) >= 100*time.Millisecond {
 				b.flushAck(now)
 			}
 			if fast != b.fastHealthy.Swap(fast) {
@@ -1661,6 +1672,7 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 		ReplyControlTx:        b.controlReply.sent.Load(),
 		ReplyControlRx:        b.controlReply.accepted.Load(),
 		WireMode:              wireMode,
+		DeliveryMode:          b.cfg.Transport.BIPDelivery,
 		PathSuspended:         b.pathSuspended.Load(),
 		FastRetransmits:       b.fastRetries.Load(),
 		ReorderBuffered:       b.rxBuffered.Load(),

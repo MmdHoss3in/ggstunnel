@@ -21,6 +21,9 @@ func TestRecoveryUsesFreshIdentityAndPreservesCounters(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if e.cfg == c {
+			t.Fatal("startup MTU clamp would mutate caller configuration")
+		}
 		if !e.recoverable(fmt.Errorf("wrapped: %w", frame.ErrKeyLifetime)) || e.recoverable(errors.New("kernel failure")) || e.recoverable(nil) {
 			t.Fatal("incorrect recovery classification")
 		}
@@ -32,9 +35,13 @@ func TestRecoveryUsesFreshIdentityAndPreservesCounters(t *testing.T) {
 		old := e.codec.SessionID()
 		e.txPackets.Store(17)
 		for i := 0; i < 3; i++ {
+			previousConfig := e.cfg
 			e.carrier.Close()
 			if err := e.refreshTransport(); err != nil {
 				t.Fatal(err)
+			}
+			if e.cfg == previousConfig {
+				t.Fatal("fresh carrier configuration was not adopted")
 			}
 			if e.codec.SessionID() == old || e.txPackets.Load() != 17 {
 				t.Fatal("recovery reused key or lost counters")

@@ -13,6 +13,32 @@ concurrency:
   group: compact-validation-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  candidate-features:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Build candidate
+        run: |
+          python3 -m py_compile scripts/candidate_validation.py
+          bash scripts/build-release.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool iptables
+      - name: Opaque carriers, loss A/B and local MTU
+        run: sudo env GITHUB_ACTIONS=true python3 scripts/candidate_validation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: transport-validation-candidate-${{ matrix.runner }}
+          path: extended-results/
   format-patch:
     runs-on: ubuntu-24.04
     steps:

@@ -20,6 +20,11 @@ type Telemetry struct {
 	At                     time.Time              `json:"at"`
 	Role                   string                 `json:"role"`
 	Profile                string                 `json:"profile"`
+	WireMode               string                 `json:"wire_mode,omitempty"`
+	EffectivePayload       int64                  `json:"effective_frame_payload"`
+	OuterMTU               int64                  `json:"local_underlay_mtu,omitempty"`
+	PeerAuthenticated      bool                   `json:"peer_authenticated"`
+	PeerSilenceMS          int64                  `json:"peer_silence_ms"`
 	TxReadPackets          uint64                 `json:"tx_read_packets"`
 	RxDeliveredPackets     uint64                 `json:"rx_delivered_packets"`
 	TxReadBytes            uint64                 `json:"tx_read_bytes"`
@@ -44,6 +49,12 @@ func (e *Engine) SnapshotTelemetry(now time.Time) Telemetry {
 		TxReadBytes: e.txBytes.Load(), RxDeliveredBytes: e.rxBytes.Load(), EnqueueDrops: e.drops.Load(),
 		TUNQueueDrops: e.tunQueueDrops.Load(),
 		Replays:       e.replays.Load(), AuthenticationFailures: e.authFails.Load(), Malformed: e.malformed.Load()}
+	s.WireMode = e.cfg.Transport.WireMode
+	s.EffectivePayload, s.OuterMTU = e.effectivePayload.Load(), e.outerMTU.Load()
+	if at := e.authenticatedRX.Load(); at != 0 {
+		s.PeerAuthenticated = true
+		s.PeerSilenceMS = max(0, now.Sub(time.Unix(0, at)).Milliseconds())
+	}
 	if c, ok := e.carrier.(carrier.Statser); ok {
 		v := c.SnapshotStats()
 		s.Carrier = &v

@@ -48,6 +48,7 @@ type RuntimeStats struct {
 	HandshakeWaitMS   int64  `json:"handshake_wait_ms"`
 	ACKsCoalesced     uint64 `json:"acks_coalesced"`
 	WireMode          string `json:"wire_mode,omitempty"`
+	DeliveryMode      string `json:"delivery_mode,omitempty"`
 
 	FastDataTx      uint64 `json:"fast_data_tx"`
 	PullDataTx      uint64 `json:"pull_data_tx"`
@@ -100,6 +101,8 @@ func New(c *config.Config) (Carrier, error) {
 		return NewRaw(c, "gre")
 	case "ipip":
 		return NewRaw(c, "ipip")
+	case "dcpi":
+		return NewRaw(c, "dcpi")
 	case "bip":
 		return NewBIP(c)
 	default:

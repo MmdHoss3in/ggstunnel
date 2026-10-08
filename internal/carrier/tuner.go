@@ -18,6 +18,7 @@ type bipTuner struct {
 	acked, samples, cuts, resets    uint64
 	activePath                      byte
 	pathThresholds                  [4]float64
+	delivery                        deliveryController
 }
 
 type TunerSnapshot struct {
@@ -35,6 +36,12 @@ type TunerSnapshot struct {
 	RTTSamples     uint64  `json:"rtt_samples"`
 	CongestionCuts uint64  `json:"congestion_cuts"`
 	Resets         uint64  `json:"resets"`
+	Algorithm      string  `json:"algorithm,omitempty"`
+	BaseRTTMS      float64 `json:"base_rtt_ms,omitempty"`
+	QueueDelayMS   float64 `json:"queue_delay_ms,omitempty"`
+	DeliveryMbps   float64 `json:"delivery_mbps,omitempty"`
+	FlightBytes    uint64  `json:"flight_bytes,omitempty"`
+	LossRepairs    uint64  `json:"loss_repairs,omitempty"`
 }
 
 func (t *bipTuner) resizeWindow(limit int) {
@@ -77,6 +84,7 @@ func (t *bipTuner) reset() {
 	t.recoveryUntil = time.Time{}
 	t.activePath = 0
 	t.pathThresholds = [4]float64{}
+	t.delivery = deliveryController{}
 	t.resets++
 }
 func (t *bipTuner) window() int {
@@ -137,6 +145,13 @@ func (t *bipTuner) onAck(clean int, sample time.Duration, now time.Time) {
 	// Data ACK delay can exceed quiet-path RTT under load. Keep a safety margin
 	// instead of an 82ms timeout on a measured ~80ms Internet path.
 	t.rto = t.clampRTO(max(2*t.srtt, t.srtt+max(25*time.Millisecond, 4*t.variance)))
+	if t.cfg.Algorithm == "delivery" {
+		t.delivery.observeRTT(sample, now)
+		if !now.Before(t.recoveryUntil) && t.delivery.queueDelay(t.srtt) < t.queueBudget() && t.cwnd < t.threshold {
+			t.cwnd = math.Min(float64(t.maxWindow), t.cwnd+float64(clean))
+		}
+		return
+	}
 	if now.Before(t.recoveryUntil) {
 		return
 	}
@@ -154,6 +169,12 @@ func (t *bipTuner) onTimeout(now time.Time) {
 	if !t.adaptive() || now.Before(t.recoveryUntil) {
 		return
 	}
+	if t.workingDeliveryClock(now) {
+		// An isolated timer expiration with continuing delivery is not a
+		// stalled path. Repair still consumes pacing/retry/flight budgets.
+		t.delivery.repairs++
+		return
+	}
 	t.threshold = math.Max(1, t.cwnd/2)
 	t.cwnd = t.threshold
 	t.credit = math.Min(t.credit, float64(t.burst()))
@@ -166,6 +187,10 @@ func (t *bipTuner) onTimeout(now time.Time) {
 // a stalled delivery. Pacing and the per-flight loss guard remain active.
 func (t *bipTuner) onFastLoss(now time.Time) {
 	if !t.adaptive() || now.Before(t.recoveryUntil) {
+		return
+	}
+	if t.workingDeliveryClock(now) {
+		t.delivery.repairs++
 		return
 	}
 	t.threshold = math.Max(1, t.cwnd*0.8)
@@ -188,6 +213,7 @@ func (t *bipTuner) pathChanged() {
 	t.srtt = 0
 	t.variance = 0
 	t.rto = t.clampRTO(t.initialRTO)
+	t.delivery.resetPath()
 	// Never set the threshold to the current flight merely because timing
 	// changed: that would invent a new congestion event at a tiny window.
 	t.credit = math.Min(t.credit, float64(t.burst()))
@@ -226,5 +252,5 @@ func (t *bipTuner) snapshot() TunerSnapshot {
 	if t.activePath > 0 && t.activePath < 4 {
 		pathMode = [4]string{"", "fast", "pull", "compat"}[t.activePath]
 	}
-	return TunerSnapshot{WindowLimit: t.maxWindow, Mode: t.cfg.Mode, PathMode: pathMode, Threshold: int(t.threshold), SRTTMS: float64(t.srtt) / float64(time.Millisecond), RTTVariationMS: float64(t.variance) / float64(time.Millisecond), RTOMS: float64(t.rto) / float64(time.Millisecond), Window: t.window(), PacingPPS: t.rate(), Burst: t.burst(), AckedFrames: t.acked, RTTSamples: t.samples, CongestionCuts: t.cuts, Resets: t.resets}
+	return TunerSnapshot{WindowLimit: t.maxWindow, Mode: t.cfg.Mode, PathMode: pathMode, Threshold: int(t.threshold), SRTTMS: float64(t.srtt) / float64(time.Millisecond), RTTVariationMS: float64(t.variance) / float64(time.Millisecond), RTOMS: float64(t.rto) / float64(time.Millisecond), Window: t.window(), PacingPPS: t.rate(), Burst: t.burst(), AckedFrames: t.acked, RTTSamples: t.samples, CongestionCuts: t.cuts, Resets: t.resets, Algorithm: t.cfg.Algorithm, BaseRTTMS: float64(t.delivery.baseRTT) / float64(time.Millisecond), QueueDelayMS: float64(t.delivery.queueDelay(t.srtt)) / float64(time.Millisecond), DeliveryMbps: t.delivery.rate * 8 / 1e6, FlightBytes: t.delivery.flightBytes, LossRepairs: t.delivery.repairs}
 }

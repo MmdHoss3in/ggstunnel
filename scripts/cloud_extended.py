@@ -99,6 +99,9 @@ class Pair:
                 run('ip', '-n', name, 'link', 'set', 'lo', 'up')
                 cfg = json.loads((SOURCE / 'examples' / ('server.json' if i == 0 else 'client.json')).read_text())
                 cfg['profile'] = profile = self.profile; cfg['psk'] = key
+                # Per-carrier options in BIP examples do not apply to raw/UDP/TCP.
+                if profile != 'bip': cfg['transport'].pop('bip_delivery',None)
+                if profile == 'dcpi': cfg['transport']['wire_mode']='opaque'
                 cfg['tuner']['mode'] = 'adaptive' if profile == 'bip' else 'manual'
                 cfg['real'].update(local_ip=self.outer[i], peer_ip=self.outer[1-i],
                                    listen_addr=self.outer[i] + ':24443', peer_addr=self.outer[1-i] + ':24443')
@@ -147,12 +150,21 @@ class Pair:
         if self.supervised:
             run('systemctl','start',self.units[i])
         else:
+            config_path = self.path / f'{i}.json'
+            if self.executables[i] != BIN:
+                # Historical baselines reject unknown fields. Preserve their
+                # original algorithm/delivery without downgrading the candidate.
+                cfg = json.loads(config_path.read_text())
+                for key in ('algorithm','queue_delay_ms'): cfg.get('tuner',{}).pop(key,None)
+                for key in ('bip_delivery','wire_mode'): cfg.get('transport',{}).pop(key,None)
+                config_path = self.path / f'baseline-{i}.json'
+                config_path.write_text(json.dumps(cfg)); config_path.chmod(0o600)
             env = os.environ.copy()
             if os.environ.get('GGS_RETRY_TRACE') == 'true':
                 env['GGSTUNNEL_BIP_TRACE'] = str(OUT / f'{self.label}retry-{i}-{time.time_ns()}.jsonl')
                 env['GGSTUNNEL_BIP_TRACE_LOSS_ONLY'] = '1'
             self.p[i] = subprocess.Popen(['ip', 'netns', 'exec', self.names[i], str(self.executables[i]),
-                                          '-c', str(self.path / f'{i}.json')], stdout=self.logs[i], stderr=self.logs[i], env=env)
+                                          '-c', str(config_path)], stdout=self.logs[i], stderr=self.logs[i], env=env)
 
     def stop_peer(self, i):
         if self.supervised:

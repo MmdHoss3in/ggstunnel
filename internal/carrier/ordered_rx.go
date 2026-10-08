@@ -2,6 +2,45 @@ package carrier
 
 import "encoding/binary"
 
+// Independent delivery retains reliability and SACK, but does not hold every
+// IP flow behind a missing carrier sequence. Admit a packed datagram atomically:
+// no ACK is committed if even one nested frame cannot fit the bounded RX queue.
+// The actor is the sole producer, so the consumer can only increase free space.
+func (b *BIP) receiveIndependentPayload(seq uint32, payload []byte, packed bool) bool {
+	count := 1
+	if packed {
+		var valid bool
+		count, valid = validatePacked(payload, b.cfg.ReceiveFrameLimit())
+		if !valid {
+			return false
+		}
+	}
+	if cap(b.rx)-len(b.rx) < count {
+		return false
+	}
+	if packed {
+		offset := 1
+		for i := 0; i < count; i++ {
+			size := int(binary.BigEndian.Uint16(payload[offset:]))
+			offset += 2
+			b.rx <- append([]byte(nil), payload[offset:offset+size]...)
+			offset += size
+		}
+	} else {
+		b.rx <- append([]byte(nil), payload...)
+	}
+	b.recordRXSeqLocked(seq)
+	b.payloadFrameRx.Add(1)
+	return true
+}
+
+func (b *BIP) receivePayload(seq uint32, payload []byte, packed bool) bool {
+	if b.cfg.Transport.BIPDelivery == "independent" {
+		return b.receiveIndependentPayload(seq, payload, packed)
+	}
+	return b.receiveOrderedPayload(seq, payload, packed)
+}
+
 // The actor owns the bounded reorder buffer. Acceptance/SACK means the frame
 // is retained, not necessarily already consumed by TUN. Preserve a slot for
 // the missing next frame so a full future window cannot deadlock recovery.

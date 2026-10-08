@@ -9,6 +9,7 @@ import (
 func adaptiveTuner() *bipTuner {
 	c := simConfig("server")
 	c.Tuner.Mode = "adaptive"
+	c.Tuner.Algorithm = "loss"
 	return newBIPTuner(c)
 }
 

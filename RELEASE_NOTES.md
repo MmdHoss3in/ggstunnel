@@ -1,5 +1,61 @@
 # Release notes
 
+## v0.3.4-rc2 — loss-path candidate and experimental opaque/DCPI
+
+The previous rc1 run passed the captured directional control checks but failed
+two retained 3% loss samples below the existing 1Mbps floor. It was not released.
+This candidate preserves the control fix and targets the loss bottleneck; no
+measured speed improvement is claimed before the exact-tagged run finishes.
+
+- Add explicit independent BIP receive delivery, atomic packed admission and a
+  matching bounded inner replay span. New samples/menu installations select it;
+  old configs without the field keep ordered. Option 21 adopts the new recipe.
+- Add a delivery/queue adaptive controller with clean RTT, bounded epoch peaks,
+  queue backoff and paced isolated-loss repair. Explicit loss-controller rollback
+  and rate ceilings remain available. This is experimental custom code, not BBR.
+- Add explicit opaque non-BIP frames (37-byte envelope vs 60), encrypted metadata,
+  masked sequence and separate domain keys; remove public raw markers/TCP greeting
+  only in this incompatible mode. Add GGS4 join codes and option 23.
+- Add experimental DCPI over IPv4 protocol 58, opaque only, no TCP/UDP port or
+  Dagger wire compatibility. Existing carrier settings keep their wire format.
+- Clamp frame payload against the local underlay MTU without lowering the TUN
+  MTU; improve root authentication/payload telemetry and add diagnostic option 24.
+- Preserve every existing gate and add native amd64/arm64 opaque carrier, MTU,
+  and loss-controller A/B observations plus authenticated parser fuzzing.
+
+See [candidate limitations](docs/next-candidate.md). Opaque UDP/raw currently fail
+closed after four peer identities; generic fresh-challenge rotation and complete
+PLPMTUD remain follow-up work. Stable publication, multiday reliability, DPI
+resistance and a universal 15% cost ceiling are not certified by these changes.
+
+## v0.3.4-rc2 — loss-path candidate and experimental opaque/DCPI
+
+The previous rc1 run passed the captured directional control checks but failed
+two retained 3% loss samples below the existing 1Mbps floor. It was not released.
+This candidate preserves the control fix and targets the loss bottleneck; no
+measured speed improvement is claimed before the exact-tagged run finishes.
+
+- Add explicit independent BIP receive delivery, atomic packed admission and a
+  matching bounded inner replay span. New samples/menu installations select it;
+  old configs without the field keep ordered. Option 21 adopts the new recipe.
+- Add a delivery/queue adaptive controller with clean RTT, bounded epoch peaks,
+  queue backoff and paced isolated-loss repair. Explicit loss-controller rollback
+  and rate ceilings remain available. This is experimental custom code, not BBR.
+- Add explicit opaque non-BIP frames (37-byte envelope vs 60), encrypted metadata,
+  masked sequence and separate domain keys; remove public raw markers/TCP greeting
+  only in this incompatible mode. Add GGS4 join codes and option 23.
+- Add experimental DCPI over IPv4 protocol 58, opaque only, no TCP/UDP port or
+  Dagger wire compatibility. Existing carrier settings keep their wire format.
+- Clamp frame payload against the local underlay MTU without lowering the TUN
+  MTU; improve root authentication/payload telemetry and add diagnostic option 24.
+- Preserve every existing gate and add native amd64/arm64 opaque carrier, MTU,
+  and loss-controller A/B observations plus authenticated parser fuzzing.
+
+See [candidate limitations](docs/next-candidate.md). Opaque UDP/raw currently fail
+closed after four peer identities; generic fresh-challenge rotation and complete
+PLPMTUD remain follow-up work. Stable publication, multiday reliability, DPI
+resistance and a universal 15% cost ceiling are not certified by these changes.
+
 ## v0.3.4-rc1 — authenticated ICMP control return-path fallback
 
 This candidate addresses the captured failure where Iran-originated EchoRequest controls were visible at the source but absent at the foreign endpoint, while EchoReply DATA and probes continued to arrive. Upgrade both endpoints to obtain the new negotiated behavior. The capture evidence is specific to that path; it does not identify the filtering device or certify long-term capacity.

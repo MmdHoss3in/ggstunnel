@@ -92,7 +92,7 @@ func writeDatagramBatch(socket datagramSocket, packets [][]byte, peer net.IP, po
 
 func (u *UDP) readLoop(ctx context.Context) {
 	err := readDatagramBatch(ctx, u.conn, func(payload []byte, source net.IP, port int) {
-		if !source.Equal(u.peer.IP) || port != u.peer.Port || len(payload) > u.cfg.Performance.MaxFramePayload+60 {
+		if !source.Equal(u.peer.IP) || port != u.peer.Port || len(payload) > u.cfg.ReceiveFrameLimit() {
 			return
 		}
 		cp := append([]byte(nil), payload...)
@@ -129,7 +129,7 @@ func (r *rawCarrier) readLoop(ctx context.Context) {
 			return
 		}
 		payload, ok := r.unwrap(packet[ihl:])
-		if !ok || len(payload) == 0 || len(payload) > r.cfg.Performance.MaxFramePayload+60 {
+		if !ok || len(payload) == 0 || len(payload) > r.cfg.ReceiveFrameLimit() {
 			return
 		}
 		cp := append([]byte(nil), payload...)

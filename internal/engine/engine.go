@@ -39,24 +39,37 @@ type Engine struct {
 	drops         atomic.Uint64
 	tunQueueDrops atomic.Uint64
 
-	replays     atomic.Uint64
-	reflections atomic.Uint64
-	authFails   atomic.Uint64
-	malformed   atomic.Uint64
-	lastRx      atomic.Int64
-	recoveries  atomic.Uint64
+	replays          atomic.Uint64
+	reflections      atomic.Uint64
+	authFails        atomic.Uint64
+	malformed        atomic.Uint64
+	lastRx           atomic.Int64
+	recoveries       atomic.Uint64
+	authenticatedRX  atomic.Int64
+	effectivePayload atomic.Int64
+	outerMTU         atomic.Int64
 }
 
 func New(c *config.Config) (*Engine, error) {
 	if c == nil {
 		return nil, errors.New("nil config")
 	}
+	owned := *c
+	c = &owned
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	co, err := frame.NewCodec(c.PSK)
+	if c.Transport.WireMode == "opaque" {
+		co, err = frame.NewOpaqueCodec(c.PSK)
+	}
 	if err != nil {
 		return nil, err
+	}
+	if c.Profile == "bip" && c.Transport.BIPDelivery == "independent" {
+		// A retained outer hole can be overtaken by up to 16 inner frames per
+		// packed datagram. Include the TX lookahead and bounded heartbeat slack.
+		co.SetReplayWindow(uint64(16*min(c.Performance.QueueSize, 8192) + 4096))
 	}
 	ca, err := carrier.New(c)
 	if err != nil {
@@ -67,7 +80,9 @@ func New(c *config.Config) (*Engine, error) {
 			return nil, err
 		}
 	}
-	return &Engine{cfg: c, carrier: ca, codec: co, reasm: frame.NewReassembler(10 * time.Second)}, nil
+	e := &Engine{cfg: c, carrier: ca, codec: co, reasm: frame.NewReassembler(10 * time.Second)}
+	e.effectivePayload.Store(int64(c.Performance.MaxFramePayload))
+	return e, nil
 }
 
 func (e *Engine) Run(ctx context.Context) error {
@@ -107,12 +122,30 @@ func (e *Engine) refreshTransport() error {
 	// runOnce joins every worker first. New codecs generate fresh IDs/keys;
 	// counters are never reset under an existing encryption key.
 	e.transportMu.Lock()
+	e.cfg = fresh.cfg
 	e.carrier, e.codec, e.reasm = fresh.carrier, fresh.codec, fresh.reasm
 	e.transportMu.Unlock()
 	return nil
 }
 
 func (e *Engine) runOnce(ctx context.Context) error {
+	e.authenticatedRX.Store(0)
+	e.outerMTU.Store(0)
+	e.cfg.PreserveReceiveFrameLimit()
+	if mtu, err := tun.UnderlayMTU(e.cfg); err != nil {
+		log.Printf("underlay MTU lookup unavailable; keeping configured payload: %v", err)
+	} else {
+		e.outerMTU.Store(int64(mtu))
+		payload := config.SafePayload(e.cfg.Profile, e.cfg.Transport.WireMode, mtu, e.cfg.Performance.MaxFramePayload)
+		if payload < 256 {
+			return fmt.Errorf("underlay MTU %d cannot fit the minimum authenticated payload", mtu)
+		}
+		if payload < e.cfg.Performance.MaxFramePayload {
+			log.Printf("underlay MTU %d: reducing local frame payload %d -> %d; TUN MTU retained for inner fragmentation", mtu, e.cfg.Performance.MaxFramePayload, payload)
+			e.cfg.Performance.MaxFramePayload = payload
+			e.effectivePayload.Store(int64(payload))
+		}
+	}
 	d, err := tun.Open(e.cfg.TUN.Name)
 	if err != nil {
 		return err
@@ -277,6 +310,7 @@ func (e *Engine) carrierToTun(ctx context.Context) error {
 				continue
 			}
 			e.lastRx.Store(time.Now().UnixNano())
+			e.authenticatedRX.Store(time.Now().UnixNano())
 			if d.Header.Type == frame.TypeHeartbeat {
 				continue
 			}
