@@ -80,10 +80,54 @@ func TestFairQueueExpiresPacketsWithoutReorderingFreshFlows(t *testing.T) {
 	q.push(flowPacket(1, 1))
 	q.push(flowPacket(2, 1))
 	now = now.Add(time.Second)
-	fresh := flowPacket(1, 2)
+	fresh := flowPacket(3, 2)
 	q.push(fresh)
 	got, err := q.pop(context.Background())
 	if err != nil || !bytes.Equal(got, fresh) || expired != 2 || q.bytes != 0 || q.count != 0 {
 		t.Fatal("stale flow cleanup failed", expired, err)
+	}
+}
+
+func TestFairQueueExpiredFullFlowAcceptsFreshRetry(t *testing.T) {
+	q := newFairPacketQueue()
+	now := time.Unix(10, 0)
+	q.now = func() time.Time { return now }
+	q.maxAge = time.Second
+	expired := 0
+	q.expired = func() { expired++ }
+	for i := 0; i < fairPacketsPerFlow; i++ {
+		if !q.push(flowPacket(1, uint16(i))) {
+			t.Fatal("early flow limit")
+		}
+	}
+	now = now.Add(time.Second)
+	fresh := flowPacket(1, 999)
+	if !q.push(fresh) {
+		t.Fatal("stale full flow rejected fresh retransmission")
+	}
+	got, err := q.pop(context.Background())
+	if err != nil || !bytes.Equal(got, fresh) || expired != fairPacketsPerFlow || q.bytes != 0 || q.count != 0 {
+		t.Fatal("stale ready entry or duplicate scheduling", expired, err)
+	}
+}
+
+func TestFairQueueExpiredFlowLimitAdmitsNewFlow(t *testing.T) {
+	q := newFairPacketQueue()
+	now := time.Unix(10, 0)
+	q.now = func() time.Time { return now }
+	q.maxAge = time.Second
+	for i := 0; i < fairFlows; i++ {
+		if !q.push(flowPacket(uint16(i), 0)) {
+			t.Fatal(i)
+		}
+	}
+	now = now.Add(time.Second)
+	fresh := flowPacket(fairFlows, 1)
+	if !q.push(fresh) {
+		t.Fatal("expired ready ring rejected new flow")
+	}
+	got, err := q.pop(context.Background())
+	if err != nil || !bytes.Equal(got, fresh) || q.count != 0 || q.bytes != 0 {
+		t.Fatal("ready ring was corrupted", err)
 	}
 }
