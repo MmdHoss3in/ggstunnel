@@ -1,6 +1,6 @@
 # ggstunnel — تانل رمز‌شدهٔ ایران ↔ خارج
 
-**v0.3.5 — اصلاح فشار صف ارسال:** صف هر جریان ظرفیت پایهٔ ۱۲۸ بسته دارد و برای burst کوتاه می‌تواند تا ۵۱۲ بسته رشد کند؛ سقف حافظهٔ مشترک ۸MiB حفظ می‌شود. آمار علت حذف، اشغال صف و زمان انتظار اضافه شده‌اند. قالب، MTU و تنظیمات میزبان عوض نمی‌شوند. انتشار بسته به پاس‌شدن تمام گیت‌های قبلی و مقایسهٔ فشار/تأخیر با v0.3.4 وابسته است. [رفتار، محدودیت‌ها و آزمون‌ها](docs/queue-pressure.md).
+**v0.3.6 — اصلاح فشار صف ارسال:** صف هر جریان BIP ظرفیت پایهٔ ۱۲۸ بسته دارد و برای burst کوتاه می‌تواند تا ۵۱۲ بسته رشد کند؛ سقف حافظهٔ مشترک ۸MiB حفظ می‌شود. آمار علت حذف، اشغال صف و زمان انتظار اضافه شده‌اند. قالب، MTU و تنظیمات میزبان عوض نمی‌شوند. انتشار بسته به پاس‌شدن تمام گیت‌های قبلی و مقایسهٔ فشار/تأخیر با v0.3.4 وابسته است. [رفتار، محدودیت‌ها و آزمون‌ها](docs/queue-pressure.md). [شکست‌های نامزد ۰٫۳٫۵ و محدودیت مسیر دارای افت](docs/queue-validation-history.md).
 
 **[v0.3.4 Stable منتشر شد](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4).** حفظ TUN و فورواردها هنگام بازیابی، تمدید نشست با کلید تازه، محدودیت عمر صف و بازیابی نصب قطع‌شده فعال‌اند. گزینهٔ ۲۶ قابلیت‌های جدید را تنظیم می‌کند؛ PMTU و DCPI همچنان انتخابی و آزمایشی‌اند. [رفتار و محدودیت‌ها](docs/rc6-stability.md) و [سابقهٔ مقایسه‌ها](docs/stable-validation-history.md). با دستورات زیر می‌توانید نصب یا ارتقا دهید؛ Stable تضمین چندروزه یا عبور از فایروال نیست.
 
@@ -35,7 +35,7 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.5/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.6/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh install
 ```
 
@@ -139,7 +139,7 @@ sudo ggstunnel diagnose all
 ## ارتقا و بازگشت
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.5/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.6/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh update
 ```
 

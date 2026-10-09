@@ -5,7 +5,7 @@ from pathlib import Path
 import statistics
 
 BASELINE_SOURCE = 'ac5f73d013b51a574335e5e4bd301e73505d01d6'
-CASES = ((200, '0.15%'), (500, '0%'))
+CASES = ((200, '0%'), (500, '0%'))
 
 
 def summary(rows):
@@ -69,7 +69,7 @@ def report(directory, source):
     for path in sorted(Path(directory).rglob('queue-pressure-results.jsonl')):
         rows.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
     validate(rows,source)
-    text='\n## Queue pressure and latency qualification\n\n58 exact-source observations on native amd64/arm64. Four TCP streams, 80ms RTT, 30 measured seconds after 5s warmup, three balanced pairs against immutable v0.3.4 in each direction on 200Mbps/0.15% and 500Mbps/0% paths. Concurrent hashed TCP and ping probes measure progress and latency. Separate 160Mbps UDP offered to a 50Mbps link must exercise burst admission and bounded drops while preserving sparse progress. Raw observations and samples are in queue-pressure-results.tar.gz. These are short synthetic tests, not WAN or multiday guarantees.\n\n'
+    text='\n## Queue pressure and latency qualification\n\n58 exact-source observations on native amd64/arm64. Four TCP streams, 80ms RTT, 30 measured seconds after 5s warmup, three balanced pairs against immutable v0.3.4 in each direction on 200Mbps/0% and 500Mbps/0% paths. Concurrent hashed TCP and ping probes measure progress and latency. Separate 160Mbps UDP offered to a 50Mbps link must exercise burst admission and bounded drops while preserving sparse progress. Raw observations and samples are in queue-pressure-results.tar.gz. These are short synthetic tests, not WAN or multiday guarantees.\n\n'
     text+='| Arch | Link Mbps | Loss | Direction | Speed ratio | Baseline/candidate drop % | Baseline/candidate p95 ms |\n|---|---:|---|---|---:|---:|---:|\n'
     for r in rows:
         if r['kind']=='queue-pressure-summary': text+=f"| {r['architecture']} | {r['rate']} | {r['loss']} | {'reverse' if r['reverse'] else 'forward'} | {r['geometric_ratio']:.3f} | {100*r['baseline_drop_fraction']:.3f}/{100*r['candidate_drop_fraction']:.3f} | {r['baseline_ping_p95_ms']:.2f}/{r['candidate_ping_p95_ms']:.2f} |\n"

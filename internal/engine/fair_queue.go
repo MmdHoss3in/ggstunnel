@@ -8,8 +8,8 @@ import (
 )
 
 const fairFlows = 1024
-const fairBasePacketsPerFlow = 128
-const fairPacketsPerFlow = 512
+const fairPacketsPerFlow = 128
+const fairBurstPacketsPerFlow = 512
 const fairBytes = 8 << 20
 const fairBurstAge = 20 * time.Millisecond
 
@@ -56,6 +56,7 @@ type fairPacketQueue struct {
 	now                func() time.Time
 	expired            func()
 	stats              QueueTelemetry
+	burst              bool
 }
 
 // Counters include packets rejected before tx_read_packets is incremented.
@@ -129,13 +130,17 @@ func (q *fairPacketQueue) push(p []byte) bool {
 		f = &packetFlowQueue{packets: make([][]byte, 16), queuedAt: make([]time.Time, 16)}
 		q.flows[k] = f
 	}
-	if f.count == fairPacketsPerFlow || f.count >= fairBasePacketsPerFlow && now.Sub(f.queuedAt[f.head]) >= fairBurstAge {
+	limit := fairPacketsPerFlow
+	if q.burst {
+		limit = fairBurstPacketsPerFlow
+	}
+	if f.count == limit || q.burst && f.count >= fairPacketsPerFlow && now.Sub(f.queuedAt[f.head]) >= fairBurstAge {
 		q.stats.FlowLimitDrops++
 		return false
 	}
 	if f.count == len(f.packets) {
 		// Allocate metadata only for flows that actually need a larger ring.
-		n := min(2*len(f.packets), fairPacketsPerFlow)
+		n := min(2*len(f.packets), limit)
 		packets, times := make([][]byte, n), make([]time.Time, n)
 		for i := 0; i < f.count; i++ {
 			j := (f.head + i) % len(f.packets)
@@ -143,7 +148,7 @@ func (q *fairPacketQueue) push(p []byte) bool {
 		}
 		f.packets, f.queuedAt, f.head = packets, times, 0
 	}
-	if f.count >= fairBasePacketsPerFlow {
+	if f.count >= fairPacketsPerFlow {
 		q.stats.BurstAdmissions++
 	}
 	if !f.ready {
@@ -280,6 +285,7 @@ func (q *fairPacketQueue) pop(ctx context.Context) ([]byte, error) {
 func (e *Engine) fairTunToCarrier(parent context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	q := newFairPacketQueue()
+	q.burst = true
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

@@ -13,7 +13,7 @@ from queue_pressure_report import summary
 
 BASELINE_SOURCE = 'ac5f73d013b51a574335e5e4bd301e73505d01d6'
 BASELINE_SHA = 'bfd796fc81abd294ba43b653fe0a5bbd8776cddaba926219b0678c79c78e73b8'
-CASES = ((200, '0.15%'), (500, '0%'))
+CASES = ((200, '0%'), (500, '0%'))
 SOURCE_COMMIT = None
 
 

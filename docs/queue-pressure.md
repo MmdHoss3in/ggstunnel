@@ -1,4 +1,4 @@
-# v0.3.5: bounded burst admission and queue diagnosis
+# v0.3.6: bounded burst admission and queue diagnosis
 
 Field v0.3.4 snapshots over approximately one minute showed 33,026 new local
 TUN queue drops at the foreign endpoint and 3,244 in Iran. Both authenticated
@@ -6,10 +6,10 @@ BIP FAST paths stayed up, with no recovery, expired queue packets or new carrier
 receive overflow. These snapshots identify local admission loss; they do not
 identify the cause of every outer retransmission or prove a firewall fault.
 
-The old fixed 128-packet per-flow queue is now a 128-packet base with a bounded
+For BIP, the old fixed 128-packet per-flow queue is now a 128-packet base with a bounded
 burst reservoir. It admits up to 512 packets only while the oldest waiting packet
 is younger than 20ms. Older queues cannot borrow more capacity above the base.
-The shared 8MiB payload budget, 1024-flow bound, FIFO order within each flow,
+Generic carriers retain their original 128-packet bound. The shared 8MiB payload budget, 1024-flow bound, FIFO order within each flow,
 round-robin service and configured packet expiry remain in force. Ring metadata
 starts at 16 slots and grows only when needed, rather than reserving 512 slots
 for every sparse flow. This is not a 20ms maximum latency guarantee or a new
@@ -35,8 +35,10 @@ High-water values cover the process lifetime, including internal recoveries.
 All prior release gates remain mandatory. New native amd64 and arm64 jobs retain
 58 observations: 48 four-stream TCP measurements, eight paired summaries and
 two deliberate overload tests. Each direction has three balanced v0.3.4/candidate
-pairs at 80ms RTT, 30 measured seconds after 5s warm-up, on 200Mbps/0.15% loss
-and 500Mbps/0% loss. The immutable v0.3.4 archive SHA256 is
+pairs at 80ms RTT, 30 measured seconds after 5s warm-up, on clean 200Mbps and 500Mbps paths. Random-loss qualification remains in the
+unchanged historical gates; the failed four-stream loss recipe is retained in
+[qualification history](queue-validation-history.md), and its100Mbps floor is
+not certified by this queue study. The immutable v0.3.4 archive SHA256 is
 `bfd796fc81abd294ba43b653fe0a5bbd8776cddaba926219b0678c79c78e73b8`.
 
 Frozen gates: 100/300Mbps capacity floors; geometric paired speed >=90%, every

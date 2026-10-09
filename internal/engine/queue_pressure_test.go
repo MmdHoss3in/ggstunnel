@@ -11,8 +11,14 @@ import (
 	"ggstunnel/internal/config"
 )
 
-func TestQueuePressureBurstAndPersistentBackpressure(t *testing.T) {
+func newBurstTestQueue() *fairPacketQueue {
 	q := newFairPacketQueue()
+	q.burst = true
+	return q
+}
+
+func TestQueuePressureBurstAndPersistentBackpressure(t *testing.T) {
+	q := newBurstTestQueue()
 	now := time.Unix(10, 0)
 	q.now = func() time.Time { return now }
 	for i := 0; i < 400; i++ {
@@ -39,13 +45,13 @@ func TestQueuePressureBurstAndPersistentBackpressure(t *testing.T) {
 		}
 	}
 	s := q.snapshot()
-	if s.FlowLimitDrops != 1 || s.BurstAdmissions != 400-fairBasePacketsPerFlow || s.DepthPackets != 0 || s.DepthBytes != 0 || s.MaxSojournMS != 20 {
+	if s.FlowLimitDrops != 1 || s.BurstAdmissions != 400-fairPacketsPerFlow || s.DepthPackets != 0 || s.DepthBytes != 0 || s.MaxSojournMS != 20 {
 		t.Fatal("incorrect burst accounting", s)
 	}
 }
 
 func TestQueuePressureWrappedRingGrowthPreservesFIFO(t *testing.T) {
-	q := newFairPacketQueue()
+	q := newBurstTestQueue()
 	q.now = func() time.Time { return time.Unix(10, 0) }
 	for i := 0; i < 16; i++ {
 		q.push(flowPacket(1, uint16(i)))
@@ -53,7 +59,7 @@ func TestQueuePressureWrappedRingGrowthPreservesFIFO(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		q.pop(context.Background())
 	}
-	for i := 16; i < fairPacketsPerFlow+12; i++ {
+	for i := 16; i < fairBurstPacketsPerFlow+12; i++ {
 		if !q.push(flowPacket(1, uint16(i))) {
 			t.Fatal("ring failed to grow", i)
 		}
@@ -61,19 +67,19 @@ func TestQueuePressureWrappedRingGrowthPreservesFIFO(t *testing.T) {
 	if q.push(flowPacket(1, 999)) {
 		t.Fatal("hard per-flow bound exceeded")
 	}
-	for i := 12; i < fairPacketsPerFlow+12; i++ {
+	for i := 12; i < fairBurstPacketsPerFlow+12; i++ {
 		p, err := q.pop(context.Background())
 		if err != nil || binary.BigEndian.Uint16(p[24:]) != uint16(i) {
 			t.Fatal("wrapped ring corrupted", i, err)
 		}
 	}
-	if q.snapshot().PeakFlowPackets != fairPacketsPerFlow {
+	if q.snapshot().PeakFlowPackets != fairBurstPacketsPerFlow {
 		t.Fatal("missing peak")
 	}
 }
 
 func TestQueuePressureByteAndFlowReasons(t *testing.T) {
-	q := newFairPacketQueue()
+	q := newBurstTestQueue()
 	q.now = func() time.Time { return time.Unix(10, 0) }
 	for i := 0; i < fairFlows; i++ {
 		q.push(flowPacket(uint16(i), 0))
@@ -96,22 +102,22 @@ func TestQueuePressureByteAndFlowReasons(t *testing.T) {
 }
 
 func TestQueuePressureActualSharedPayloadBudget(t *testing.T) {
-	q := newFairPacketQueue()
+	q := newBurstTestQueue()
 	q.now = func() time.Time { return time.Unix(10, 0) }
 	for port := 0; port < 32; port++ {
 		p := append(flowPacket(uint16(port), 0), make([]byte, 1240)...)
-		for i := 0; i < fairPacketsPerFlow; i++ {
+		for i := 0; i < fairBurstPacketsPerFlow; i++ {
 			q.push(p)
 		}
 	}
 	s := q.snapshot()
-	if s.ByteLimitDrops == 0 || s.PeakBytes > fairBytes || s.DepthBytes > fairBytes || s.PeakFlowPackets > fairPacketsPerFlow {
+	if s.ByteLimitDrops == 0 || s.PeakBytes > fairBytes || s.DepthBytes > fairBytes || s.PeakFlowPackets > fairBurstPacketsPerFlow {
 		t.Fatal("real payload exceeded bounded reservoir", s)
 	}
 }
 
 func TestQueuePressureConcurrentSnapshotAndIngress(t *testing.T) {
-	q := newFairPacketQueue()
+	q := newBurstTestQueue()
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -125,13 +131,13 @@ func TestQueuePressureConcurrentSnapshotAndIngress(t *testing.T) {
 	}
 	wg.Wait()
 	s := q.snapshot()
-	if s.IngressPackets != 8000 || s.DepthBytes > fairBytes || s.PeakFlowPackets > fairPacketsPerFlow {
+	if s.IngressPackets != 8000 || s.DepthBytes > fairBytes || s.PeakFlowPackets > fairBurstPacketsPerFlow {
 		t.Fatal("concurrent bounds violated", s)
 	}
 }
 
 func TestQueuePressureTelemetryExportsAdmissionBeforeSend(t *testing.T) {
-	q := newFairPacketQueue()
+	q := newBurstTestQueue()
 	q.push(flowPacket(1, 0))
 	e := &Engine{cfg: &config.Config{Profile: "bip"}, packetQueue: q}
 	b, err := json.Marshal(e.SnapshotTelemetry(time.Now()))
@@ -144,5 +150,18 @@ func TestQueuePressureTelemetryExportsAdmissionBeforeSend(t *testing.T) {
 	}
 	if fields["tun_ingress_packets"] != float64(1) || fields["queue_depth_packets"] != float64(1) || fields["tx_read_packets"] != float64(0) {
 		t.Fatal("admission confused with successful transmission", string(b))
+	}
+}
+
+func TestQueuePressureGenericRetainsOriginalBound(t *testing.T) {
+	q := newFairPacketQueue()
+	q.now = func() time.Time { return time.Unix(10, 0) }
+	for i := 0; i < fairPacketsPerFlow; i++ {
+		if !q.push(flowPacket(1, uint16(i))) {
+			t.Fatal("early rejection")
+		}
+	}
+	if q.push(flowPacket(1, 999)) || q.snapshot().BurstAdmissions != 0 {
+		t.Fatal("generic carrier borrowed BIP burst capacity")
 	}
 }

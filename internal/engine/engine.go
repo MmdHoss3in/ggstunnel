@@ -116,6 +116,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 	defer fw.Close()
 	q := newFairPacketQueue()
+	q.burst = e.cfg.Profile == "bip"
 	q.maxAge = time.Duration(e.cfg.Performance.QueueMaxAgeMS) * time.Millisecond
 	q.expired = func() { e.queueExpired.Add(1); e.drops.Add(1); e.tunQueueDrops.Add(1) }
 	e.transportMu.Lock()
