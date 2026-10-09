@@ -42,6 +42,7 @@ class StabilityManagerTests(unittest.TestCase):
   m.symlink(first,m.OPT/'current');m.symlink(second,m.OPT/'previous')
   m.atomic(m.UNITS/'ggstunnel@.service','old unit',0o640)
   m.atomic(m.WRAPPER,'old wrapper',0o750)
+  m.atomic(m.confpath('ggs01'),json.dumps(self.config()))
   return first,second
  def test_interrupted_upgrade_recovers_complete_previous_state(self):
   first,second=self.fixture();m.begin_install_transaction(['ggs01'])

@@ -128,7 +128,8 @@ def performance():
                             with Pair(label=f'rc6-perf-{loss}-{rate}-{reverse}-{trial}-{version}-') as pair:
                                 exe=baseline if version=='rc5' else BIN
                                 pair.executables=[exe,exe];pair.baseline_preserve_config=True
-                                pair.shape(rate,80,loss);pair.restart();row['cold_start_sec']=pair.reachable(20)
+                                pair.shape(rate,80,loss)
+                                began=time.monotonic();pair.restart();row['cold_start_sec']=round(time.monotonic()-began,3)
                                 row.update(transfer(pair,20,reverse))
                             floor=(150 if rate==200 else 300) if loss=='0%' else 30 if loss=='1%' else 15
                             if row['received_mbps']<floor or not row['same_processes'] or any(row['recoveries']) or row['progress']['verified_frames']<10 or row['progress']['max_gap_sec']>5:raise RuntimeError('Frozen capacity/integrity/process gate failed')
