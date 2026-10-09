@@ -23,6 +23,7 @@ type Telemetry struct {
 	WireMode               string                 `json:"wire_mode,omitempty"`
 	EffectivePayload       int64                  `json:"effective_frame_payload"`
 	OuterMTU               int64                  `json:"local_underlay_mtu,omitempty"`
+	PathMTUState           string                 `json:"path_mtu_state,omitempty"`
 	PeerAuthenticated      bool                   `json:"peer_authenticated"`
 	PeerSilenceMS          int64                  `json:"peer_silence_ms"`
 	TxReadPackets          uint64                 `json:"tx_read_packets"`
@@ -31,6 +32,7 @@ type Telemetry struct {
 	RxDeliveredBytes       uint64                 `json:"rx_delivered_bytes"`
 	EnqueueDrops           uint64                 `json:"enqueue_drops"`
 	TUNQueueDrops          uint64                 `json:"tun_queue_drops"`
+	QueueExpired           uint64                 `json:"queue_expired_packets"`
 	Replays                uint64                 `json:"replays"`
 	AuthenticationFailures uint64                 `json:"authentication_failures"`
 	Malformed              uint64                 `json:"malformed"`
@@ -48,9 +50,13 @@ func (e *Engine) SnapshotTelemetry(now time.Time) Telemetry {
 		TxReadPackets: e.txPackets.Load(), RxDeliveredPackets: e.rxPackets.Load(),
 		TxReadBytes: e.txBytes.Load(), RxDeliveredBytes: e.rxBytes.Load(), EnqueueDrops: e.drops.Load(),
 		TUNQueueDrops: e.tunQueueDrops.Load(),
+		QueueExpired:  e.queueExpired.Load(),
 		Replays:       e.replays.Load(), AuthenticationFailures: e.authFails.Load(), Malformed: e.malformed.Load()}
 	s.WireMode = e.cfg.Transport.WireMode
 	s.EffectivePayload, s.OuterMTU = e.effectivePayload.Load(), e.outerMTU.Load()
+	if state := e.pathState.Load(); state != nil {
+		s.PathMTUState = state.(string)
+	}
 	if at := e.authenticatedRX.Load(); at != 0 {
 		s.PeerAuthenticated = true
 		s.PeerSilenceMS = max(0, now.Sub(time.Unix(0, at)).Milliseconds())

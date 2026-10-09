@@ -66,7 +66,10 @@ func appendPackedFrame(dst, frame []byte) []byte {
 // next frame cannot fit; the channel's bounded backlog gains at most one slot.
 func (b *BIP) takeTXPayload() ([]byte, byte, int) {
 	first := b.popTX()
-	limit := min(1408, b.cfg.Performance.MaxFramePayload+60)
+	limit := min(1408, int(b.pathPayload.Load())+60)
+	if limit == 60 {
+		limit = min(1408, b.cfg.Performance.MaxFramePayload+60)
+	}
 	if first == nil || !b.packetPacking.Load() || len(b.tx) == 0 || len(first)+5 >= limit {
 		return first, 0, 1
 	}

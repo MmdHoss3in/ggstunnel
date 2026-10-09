@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"ggstunnel/internal/config"
 	"ggstunnel/internal/frame"
+	"ggstunnel/internal/pathmtu"
 	"ggstunnel/internal/session"
 	"log"
 	"math"
@@ -109,6 +110,9 @@ type PacketIO interface {
 }
 
 type BIP struct {
+	pathRequests                                                                                     chan bipPathRequest
+	pathPending                                                                                      *bipPathPending
+	pathPayload                                                                                      atomic.Int64
 	allowPacking                                                                                     bool
 	peerPackSupport                                                                                  bool
 	packetPacking                                                                                    atomic.Bool
@@ -238,6 +242,8 @@ func NewBIP(c *config.Config) (Carrier, error) {
 	b := &BIP{tuner: newBIPTuner(c), cfg: c, local: l, peer: p, localID: sid, master: master, gate: g, rawfd: -1, id: binary.BigEndian.Uint16(seed[8:]), tx: make(chan []byte, c.Performance.QueueSize), rx: make(chan []byte, c.Performance.QueueSize), incoming: make(chan []byte, c.Performance.QueueSize), errors: make(chan error, 1), pending: make(map[uint32]*pendingData), rxAck: sackWindow{init: true, seen: make(map[uint32]bool)}, replay: frame.NewReplayGuard(65536)}
 	b.incomingBatches = make(chan [][]byte, max(1, c.Performance.QueueSize/16))
 	b.closed = make(chan struct{})
+	b.pathRequests = make(chan bipPathRequest, 1)
+	b.pathPayload.Store(int64(c.Performance.MaxFramePayload))
 	b.txReady = make(chan struct{}, 1)
 	// The retransmission window and the unsent backlog serve different
 	// purposes. Keep a small unsent backlog waiting ahead of inner
@@ -1049,8 +1055,15 @@ func (b *BIP) handle(body []byte, now time.Time) {
 	b.traceRecord(traceEvent{At: now, Event: "wire_rx", Seq: p.token, Ack: p.ack, Sack: p.sack, Kind: p.kind, Type: p.typ})
 	switch p.kind {
 	case bipKindFastProbe:
+		if reply := pathmtu.Reply(p.payload); reply != nil {
+			_ = b.sendResponse(p, bipKindFastAck, 0, p.token, reply, b.active)
+			break
+		}
 		b.respondFASTProbe(p, now)
 	case bipKindFastAck:
+		if b.acceptPathReply(p) {
+			break
+		}
 		if p.token != 0 && p.token == b.fastToken && now.Before(b.fastDeadline) {
 			if !now.Before(b.fastUntil) {
 				b.expeditePathRetries(now)
@@ -1224,6 +1237,8 @@ func (b *BIP) run(ctx context.Context) {
 			b.processNativeBatch(ctx, packets)
 		case <-b.txReady:
 			b.pumpFast(time.Now())
+		case req := <-b.pathRequests:
+			b.startPathProbe(req)
 		case <-tick.C:
 			// A ticker timestamp can predate queued I/O by an entire scheduling
 			// pause. Deadlines must start at actual transmission time.
@@ -1505,6 +1520,8 @@ func (b *BIP) prepareWire(typ byte, id, tuple uint16, kind, flags byte, token ui
 		ip = make([]byte, 20+len(body))
 		copy(ip[20:], body)
 	} else {
+		p.payload = probePayload(p, 92)
+		payload = p.payload
 		if 20+72+len(payload) > 1500 {
 			return nil, syscall.EMSGSIZE
 		}

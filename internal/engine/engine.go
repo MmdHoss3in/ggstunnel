@@ -48,6 +48,9 @@ type Engine struct {
 	authenticatedRX  atomic.Int64
 	effectivePayload atomic.Int64
 	outerMTU         atomic.Int64
+	queueExpired     atomic.Uint64
+	pathState        atomic.Value
+	pathReplies      chan []byte
 }
 
 func New(c *config.Config) (*Engine, error) {
@@ -89,7 +92,35 @@ func New(c *config.Config) (*Engine, error) {
 }
 
 func (e *Engine) Run(ctx context.Context) error {
+	// The physical interface and forward listeners belong to the process,
+	// not to an encryption/session generation.
+	if err := e.clampLocalPayload(); err != nil {
+		_ = e.carrier.Close()
+		return err
+	}
+	d, err := tun.Open(e.cfg.TUN.Name)
+	if err != nil {
+		_ = e.carrier.Close()
+		return err
+	}
+	defer d.Close()
+	if err := d.Configure(e.cfg); err != nil {
+		_ = e.carrier.Close()
+		return err
+	}
+	fw, err := forward.Start(ctx, e.cfg.Forwards)
+	if err != nil {
+		_ = e.carrier.Close()
+		return fmt.Errorf("start forwards: %w", err)
+	}
+	defer fw.Close()
+	q := newFairPacketQueue()
+	q.maxAge = time.Duration(e.cfg.Performance.QueueMaxAgeMS) * time.Millisecond
+	q.expired = func() { e.queueExpired.Add(1); e.drops.Add(1); e.tunQueueDrops.Add(1) }
+	bridge := newDeviceBridge(ctx, d, q, func() { e.drops.Add(1); e.tunQueueDrops.Add(1) })
+	defer bridge.Close()
 	for {
+		e.tun = bridge.generation(ctx)
 		err := e.runOnce(ctx)
 		if ctx.Err() != nil {
 			return nil
@@ -98,7 +129,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			return err
 		}
 		e.recoveries.Add(1)
-		log.Printf("recovering transport with fresh authenticated identity: %v", err)
+		log.Printf("recovering transport with fresh authenticated identity; retaining TUN/routes/forwards: %v", err)
 		select {
 		case <-ctx.Done():
 			return nil
@@ -113,7 +144,7 @@ func (e *Engine) Run(ctx context.Context) error {
 // Key lifetime exhaustion always requires a new sender key. BIP also recovers
 // bounded delivery/session rotation failures; unexpected errors remain fatal.
 func (e *Engine) recoverable(err error) bool {
-	return errors.Is(err, frame.ErrKeyLifetime) || (e.cfg.Transport.OpaqueSession == "challenge" && errors.Is(err, session.ErrRotationLimit)) || (e.cfg.Profile == "bip" &&
+	return errors.Is(err, errPathReduced) || errors.Is(err, frame.ErrKeyLifetime) || (e.cfg.Transport.OpaqueSession == "challenge" && errors.Is(err, session.ErrRotationLimit)) || (e.cfg.Profile == "bip" &&
 		(errors.Is(err, carrier.ErrBIPDeliveryTimeout) || errors.Is(err, carrier.ErrBIPPeerUnresponsive) || errors.Is(err, carrier.ErrBIPHandshakeTimeout) || errors.Is(err, session.ErrRotationLimit)))
 }
 
@@ -131,8 +162,9 @@ func (e *Engine) refreshTransport() error {
 	return nil
 }
 
-func (e *Engine) runOnce(ctx context.Context) error {
-	e.authenticatedRX.Store(0)
+func (e *Engine) clampLocalPayload() error {
+	e.transportMu.Lock()
+	defer e.transportMu.Unlock()
 	e.outerMTU.Store(0)
 	e.cfg.PreserveReceiveFrameLimit()
 	if mtu, err := tun.UnderlayMTU(e.cfg); err != nil {
@@ -149,26 +181,25 @@ func (e *Engine) runOnce(ctx context.Context) error {
 			e.effectivePayload.Store(int64(payload))
 		}
 	}
-	d, err := tun.Open(e.cfg.TUN.Name)
-	if err != nil {
-		return err
+	return nil
+}
+
+func (e *Engine) runOnce(ctx context.Context) error {
+	e.authenticatedRX.Store(0)
+	e.pathReplies = make(chan []byte, 8)
+	e.pathState.Store("disabled")
+	if e.cfg.Transport.PathMTU {
+		e.setPathPayload(256)
+	} else {
+		e.setPathPayload(e.cfg.Performance.MaxFramePayload)
 	}
-	e.tun = d
-	defer d.Close()
-	if err := d.Configure(e.cfg); err != nil {
-		return err
-	}
+	defer e.tun.Close()
 	if err := e.carrier.Start(ctx); err != nil {
+		_ = e.carrier.Close()
 		return fmt.Errorf("start %s carrier: %w", e.carrier.Name(), err)
 	}
-	fw, err := forward.Start(ctx, e.cfg.Forwards)
-	if err != nil {
-		e.carrier.Close()
-		return fmt.Errorf("start forwards: %w", err)
-	}
-	defer fw.Close()
 	e.lastRx.Store(time.Now().UnixNano())
-	log.Printf("ggstunnel started role=%s profile=%s tun=%s", e.cfg.Role, e.cfg.Profile, d.Name)
+	log.Printf("ggstunnel started role=%s profile=%s tun=%s", e.cfg.Role, e.cfg.Profile, e.cfg.TUN.Name)
 	return e.runWorkers(ctx)
 }
 
@@ -176,11 +207,14 @@ func (e *Engine) runOnce(ctx context.Context) error {
 func (e *Engine) runWorkers(parent context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	var wg sync.WaitGroup
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
 	launch := func(f func(context.Context) error) { wg.Add(1); go func() { defer wg.Done(); errCh <- f(ctx) }() }
 	launch(e.tunToCarrier)
 	launch(e.carrierToTun)
 	launch(e.heartbeatLoop)
+	if e.cfg.Transport.PathMTU {
+		launch(e.pathMTULoop)
+	}
 	wg.Add(2)
 	go func() { defer wg.Done(); e.statsLoop(ctx) }()
 	go func() {
@@ -201,10 +235,18 @@ func (e *Engine) runWorkers(parent context.Context) error {
 		carrierErrors = c.Errors()
 	}
 	var err error
+	var renewal <-chan time.Time
+	if e.cfg.Transport.SessionMaxAgeSec > 0 {
+		timer := time.NewTimer(time.Duration(e.cfg.Transport.SessionMaxAgeSec) * time.Second)
+		defer timer.Stop()
+		renewal = timer.C
+	}
 	select {
 	case <-parent.Done():
 	case err = <-errCh:
 	case err = <-carrierErrors:
+	case <-renewal:
+		err = fmt.Errorf("scheduled session renewal: %w", frame.ErrKeyLifetime)
 	}
 	cancel()
 	// TUN descriptors must support cancellation by Close (nonblocking runtime I/O).
@@ -221,6 +263,17 @@ func (e *Engine) runWorkers(parent context.Context) error {
 }
 
 func (e *Engine) tunToCarrier(ctx context.Context) error {
+	if device, ok := e.tun.(*generationDevice); ok {
+		for {
+			packet, err := device.ReadPacket()
+			if err != nil {
+				return err
+			}
+			if err := e.sendPacket(ctx, packet); err != nil {
+				return err
+			}
+		}
+	}
 	if e.cfg.Profile == "bip" {
 		return e.fairTunToCarrier(ctx)
 	}
@@ -240,7 +293,7 @@ func (e *Engine) tunToCarrier(ctx context.Context) error {
 }
 
 func (e *Engine) sendPacket(ctx context.Context, pkt []byte) error {
-	if e.cfg.Transport.OpaqueSession == "challenge" && e.codec.RotationDue() {
+	if e.codec.RotationDue() {
 		return frame.ErrKeyLifetime
 	}
 	if e.cfg.Transport.OpaqueSession == "challenge" {
@@ -263,12 +316,15 @@ func (e *Engine) sendPacket(ctx context.Context, pkt []byte) error {
 		}
 	}
 	pid := e.codec.NextPacketID()
-	maxp := e.cfg.Performance.MaxFramePayload
+	maxp := int(e.effectivePayload.Load())
+	if maxp == 0 {
+		maxp = e.cfg.Performance.MaxFramePayload
+	}
 	cnt := (len(pkt) + maxp - 1) / maxp
 	if cnt < 1 {
 		cnt = 1
 	}
-	if cnt > 65535 {
+	if cnt > 128 {
 		return fmt.Errorf("packet too fragmented")
 	}
 	for i := 0; i < cnt; i++ {
@@ -337,6 +393,11 @@ func (e *Engine) carrierToTun(ctx context.Context) error {
 			e.lastRx.Store(time.Now().UnixNano())
 			e.authenticatedRX.Store(time.Now().UnixNano())
 			if d.Header.Type == frame.TypeHeartbeat {
+				if e.cfg.Profile == "udp" {
+					if err := e.receivePathControl(d.Payload); errors.Is(err, frame.ErrKeyLifetime) {
+						return err
+					}
+				}
 				continue
 			}
 			if d.Header.Type != frame.TypeData {
@@ -363,7 +424,7 @@ func (e *Engine) heartbeatLoop(ctx context.Context) error {
 	for {
 		select {
 		case <-t.C:
-			if e.cfg.Transport.OpaqueSession == "challenge" && e.codec.RotationDue() {
+			if e.codec.RotationDue() {
 				return frame.ErrKeyLifetime
 			}
 			if e.cfg.Transport.OpaqueSession == "challenge" {

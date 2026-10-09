@@ -91,12 +91,15 @@ type TransportConfig struct {
 	BIPDelivery            string `json:"bip_delivery,omitempty"`
 	WireMode               string `json:"wire_mode,omitempty"`
 	OpaqueSession          string `json:"opaque_session,omitempty"`
+	SessionMaxAgeSec       int    `json:"session_max_age_sec,omitempty"`
+	PathMTU                bool   `json:"path_mtu,omitempty"`
 }
 
 type PerformanceConfig struct {
 	Profile         string `json:"profile"`
 	QueueSize       int    `json:"queue_size"`
 	MaxFramePayload int    `json:"max_frame_payload"`
+	QueueMaxAgeMS   int    `json:"queue_max_age_ms,omitempty"`
 }
 
 func Load(path string) (*Config, error) {
@@ -121,6 +124,12 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) ApplyDefaults() {
+	if c.Performance.QueueMaxAgeMS == 0 {
+		c.Performance.QueueMaxAgeMS = 5000
+	}
+	if c.Transport.SessionMaxAgeSec == 0 && (c.Profile == "bip" || c.Transport.OpaqueSession == "challenge") {
+		c.Transport.SessionMaxAgeSec = 21600
+	}
 	if c.Tuner.Algorithm == "" {
 		c.Tuner.Algorithm = "delivery"
 	}
@@ -286,6 +295,24 @@ func (c *Config) ApplyDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if c.Performance.QueueMaxAgeMS != 0 && (c.Performance.QueueMaxAgeMS < 100 || c.Performance.QueueMaxAgeMS > 30000) {
+		return errors.New("queue_max_age_ms must be 100..30000")
+	}
+	if c.Transport.SessionMaxAgeSec != 0 && (c.Transport.SessionMaxAgeSec < 30 || c.Transport.SessionMaxAgeSec > 86400) {
+		return errors.New("session_max_age_sec must be 30..86400")
+	}
+	if c.Transport.SessionMaxAgeSec > 0 && c.Profile != "bip" && c.Transport.OpaqueSession != "challenge" {
+		return errors.New("scheduled session renewal requires BIP or opaque challenge sessions")
+	}
+	if c.Transport.PathMTU && c.Profile != "bip" && c.Profile != "udp" {
+		return errors.New("path_mtu currently supports BIP and UDP")
+	}
+	if c.Transport.PathMTU && c.Profile == "udp" && c.Transport.OpaqueSession != "challenge" {
+		return errors.New("UDP path_mtu requires opaque challenge sessions")
+	}
+	if c.Transport.PathMTU && c.Performance.MaxFramePayload > 1348 {
+		return errors.New("path_mtu payload ceiling is 1348")
+	}
 	if c.Tuner.Algorithm != "" && c.Tuner.Algorithm != "loss" && c.Tuner.Algorithm != "delivery" {
 		return errors.New("tuner.algorithm must be loss or delivery")
 	}

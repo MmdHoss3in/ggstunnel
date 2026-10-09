@@ -7,6 +7,7 @@ import (
 	"ggstunnel/internal/config"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -70,6 +71,12 @@ func (u *UDP) Start(ctx context.Context) error {
 	c, err := net.ListenUDP("udp4", local)
 	if err != nil {
 		return err
+	}
+	if u.cfg.Transport.PathMTU {
+		if err := enableUDPPathMTU(c); err != nil {
+			c.Close()
+			return err
+		}
 	}
 	if err := c.SetReadBuffer(u.cfg.Transport.SockBuf); err != nil {
 		c.Close()
@@ -140,6 +147,10 @@ func (u *UDP) writeLoopScalar(ctx context.Context) {
 			u.conn.SetWriteDeadline(time.Now().Add(u.cfg.IdleTimeout()))
 			if _, err := u.conn.WriteToUDP(b, u.peer); err != nil {
 				u.stats.txErrors.Add(1)
+				if u.cfg.Transport.PathMTU && errors.Is(err, syscall.EMSGSIZE) {
+					u.stats.txDrops.Add(1)
+					continue
+				}
 				u.fail(err)
 				return
 			}

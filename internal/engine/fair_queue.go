@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"time"
 )
 
 const fairFlows = 1024
@@ -37,7 +38,9 @@ func packetFlow(p []byte) (k flowKey) {
 
 type packetFlowQueue struct {
 	packets     [fairPacketsPerFlow][]byte
+	queuedAt    [fairPacketsPerFlow]time.Time
 	head, count int
+	ready       bool
 }
 
 type fairPacketQueue struct {
@@ -47,10 +50,13 @@ type fairPacketQueue struct {
 	head, count, bytes int
 	wake               chan struct{}
 	err                error
+	maxAge             time.Duration
+	now                func() time.Time
+	expired            func()
 }
 
 func newFairPacketQueue() *fairPacketQueue {
-	return &fairPacketQueue{flows: make(map[flowKey]*packetFlowQueue), wake: make(chan struct{}, 1)}
+	return &fairPacketQueue{flows: make(map[flowKey]*packetFlowQueue), wake: make(chan struct{}, 1), now: time.Now}
 }
 
 // A full flow drops its newest packet without displacing other flows. Reads
@@ -59,15 +65,25 @@ func newFairPacketQueue() *fairPacketQueue {
 func (q *fairPacketQueue) push(p []byte) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.err != nil || q.bytes+len(p) > fairBytes {
+	if q.err != nil {
 		return false
 	}
+	now := q.now()
 	k := packetFlow(p)
 	f := q.flows[k]
+	if f != nil {
+		q.expireFlow(f, now)
+	}
+	if q.bytes+len(p) > fairBytes || f == nil && q.count >= fairFlows {
+		q.expireAll(now)
+	}
+	if q.bytes+len(p) > fairBytes {
+		return false
+	}
 	if f == nil {
 		if len(q.flows) >= fairFlows {
 			for key, idle := range q.flows {
-				if idle.count == 0 {
+				if idle.count == 0 && !idle.ready {
 					delete(q.flows, key)
 					break
 				}
@@ -82,11 +98,13 @@ func (q *fairPacketQueue) push(p []byte) bool {
 	if f.count == fairPacketsPerFlow {
 		return false
 	}
-	if f.count == 0 {
+	if !f.ready {
 		q.ready[(q.head+q.count)%fairFlows] = k
 		q.count++
+		f.ready = true
 	}
 	f.packets[(f.head+f.count)%fairPacketsPerFlow] = append([]byte(nil), p...)
+	f.queuedAt[(f.head+f.count)%fairPacketsPerFlow] = now
 	f.count++
 	q.bytes += len(p)
 	select {
@@ -94,6 +112,49 @@ func (q *fairPacketQueue) push(p []byte) bool {
 	default:
 	}
 	return true
+}
+
+// Expire before admission as well as before delivery. Otherwise a full flow
+// during an outage rejects fresh TCP retries behind packets that are too old
+// to send, potentially extending recovery to the inner TCP's maximum RTO.
+func (q *fairPacketQueue) expireFlow(f *packetFlowQueue, now time.Time) {
+	if q.maxAge <= 0 {
+		return
+	}
+	for f.count > 0 && now.Sub(f.queuedAt[f.head]) >= q.maxAge {
+		q.bytes -= len(f.packets[f.head])
+		f.packets[f.head] = nil
+		f.queuedAt[f.head] = time.Time{}
+		f.head = (f.head + 1) % fairPacketsPerFlow
+		f.count--
+		if q.expired != nil {
+			q.expired()
+		}
+	}
+}
+
+func (q *fairPacketQueue) expireAll(now time.Time) {
+	if q.maxAge <= 0 {
+		return
+	}
+	for _, f := range q.flows {
+		q.expireFlow(f, now)
+	}
+	var ready [fairFlows]flowKey
+	n := 0
+	for i := 0; i < q.count; i++ {
+		key := q.ready[(q.head+i)%fairFlows]
+		f := q.flows[key]
+		if f.count == 0 {
+			f.ready = false
+			continue
+		}
+		ready[n] = key
+		n++
+	}
+	q.ready = ready
+	q.head = 0
+	q.count = n
 }
 
 func (q *fairPacketQueue) close(err error) {
@@ -125,16 +186,30 @@ func (q *fairPacketQueue) pop(ctx context.Context) ([]byte, error) {
 			q.head = (q.head + 1) % fairFlows
 			q.count--
 			f := q.flows[k]
+			f.ready = false
+			if f.count == 0 {
+				q.mu.Unlock()
+				continue
+			}
 			p := f.packets[f.head]
+			stale := q.maxAge > 0 && q.now().Sub(f.queuedAt[f.head]) >= q.maxAge
 			f.packets[f.head] = nil
+			f.queuedAt[f.head] = time.Time{}
 			f.head = (f.head + 1) % fairPacketsPerFlow
 			f.count--
 			q.bytes -= len(p)
 			if f.count > 0 {
 				q.ready[(q.head+q.count)%fairFlows] = k
 				q.count++
+				f.ready = true
 			}
 			q.mu.Unlock()
+			if stale {
+				if q.expired != nil {
+					q.expired()
+				}
+				continue
+			}
 			return p, nil
 		}
 		q.mu.Unlock()

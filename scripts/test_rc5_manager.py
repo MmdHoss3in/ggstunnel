@@ -120,8 +120,8 @@ class RC5ManagerTests(unittest.TestCase):
  def test_every_menu_option_dispatches(self):
   route={'1':'create_server','2':'join_client','3':'status','9':'edit','10':'delete','11':'encode_join',
          '12':'run_logs','13':'diagnose','14':'capacity','15':'capacity','16':'tune','17':'tune',
-         '18':'install','19':'rollback','20':'capacity','21':'optimize_existing','22':'configure_wire','23':'configure_opaque','24':'path_test','25':'configure_transport'}
-  for choice in map(str,range(1,26)):
+         '18':'install','19':'rollback','20':'capacity','21':'optimize_existing','22':'configure_wire','23':'configure_opaque','24':'path_test','25':'configure_transport','26':'configure_stability'}
+  for choice in map(str,range(1,27)):
    with self.subTest(choice=choice),contextlib.ExitStack() as stack:
     stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
     stack.enter_context(patch.object(m,'locked',contextlib.nullcontext))

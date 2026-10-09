@@ -217,16 +217,23 @@ func writeQueuedDatagrams(ctx context.Context, closed <-chan struct{}, tx <-chan
 				if errors.Is(err, syscall.ENOSYS) {
 					fallback = true
 				} else if err != nil {
+					if errors.Is(err, syscall.EMSGSIZE) && len(metrics) > 0 {
+						metrics[0].txDrops.Add(uint64(len(packets) - sent))
+					}
 					return err
 				}
 			}
 			for _, p := range packets[sent:] {
 				if err := scalar(p); err != nil {
+					if errors.Is(err, syscall.EMSGSIZE) && len(metrics) > 0 {
+						metrics[0].txDrops.Add(uint64(len(packets) - sent))
+					}
 					return err
 				}
 				if len(metrics) > 0 {
 					metrics[0].sent(len(p))
 				}
+				sent++
 			}
 		case <-ctx.Done():
 			return nil
@@ -237,7 +244,14 @@ func writeQueuedDatagrams(ctx context.Context, closed <-chan struct{}, tx <-chan
 }
 
 func (u *UDP) writeLoop(ctx context.Context) {
-	err := writeQueuedDatagrams(ctx, u.closeCh, u.tx, u.conn, u.peer.IP, u.peer.Port, u.cfg.IdleTimeout(), func(p []byte) []byte { return p }, func(p []byte) error { _, err := u.conn.WriteToUDP(p, u.peer); return err }, &u.stats)
+	var err error
+	for {
+		err = writeQueuedDatagrams(ctx, u.closeCh, u.tx, u.conn, u.peer.IP, u.peer.Port, u.cfg.IdleTimeout(), func(p []byte) []byte { return p }, func(p []byte) error { _, err := u.conn.WriteToUDP(p, u.peer); return err }, &u.stats)
+		if !u.cfg.Transport.PathMTU || !errors.Is(err, syscall.EMSGSIZE) {
+			break
+		}
+		u.stats.txErrors.Add(1)
+	}
 	select {
 	case <-u.closeCh:
 		return
