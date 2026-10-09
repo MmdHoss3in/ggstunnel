@@ -1,8 +1,8 @@
-# v0.3.4-rc6: stability candidate, not yet published
+# v0.3.4: persistent transport and stability qualification
 
-The published RC5 baseline remains immutable. This branch has not yet qualified
-as a release; cloud results must identify the exact source commit. No local
-Windows runtime tests or builds are needed.
+The published RC5 baseline remains immutable. Publication requires every full
+release gate on the exact source commit and fail-closed inspection of its raw
+RC6 observations. No local Windows runtime tests or builds are needed.
 
 ## Runtime behavior
 
@@ -77,9 +77,10 @@ rows and runner variance, is retained; no automatic rerun until green.
   remove the limit and require upward confirmation; shrink to 1000 and require
   recovery with unchanged TUN/routes. No PTB feedback is delivered.
 - Immutable RC5 archive SHA-256 `fd14bed5120c5d609bebd389d3999b5d132eeaa8430759bfc490ab898852da12`.
-  Three fixed balanced A/B pairs for each direction and 200Mbps clean, 500Mbps
-  clean, 200Mbps 1% loss and 200Mbps 3% loss, all at 80ms. Measure 20s after 2s
-  warmup; retain cold readiness separately. Absolute receiver floors: respectively
+  Each direction at 80ms RTT: three balanced pairs for 200/500Mbps clean (20s
+  measurement after 2s warmup), five pairs for 200Mbps 1%/3% random loss (45s
+  measurement after 15s warmup). The side stream spans warmup and measurement;
+  retain cold readiness separately. Absolute receiver floors: respectively
   150/300/30/15Mbps. Require same processes, zero internal recoveries, ≥10 verified
   integrity frames and gap ≤5s. Paired geometric ratio ≥0.90, no pair <0.75,
   baseline coefficient of variation ≤0.15. Excess baseline variance makes a case
@@ -88,4 +89,6 @@ rows and runner variance, is retained; no automatic rerun until green.
 These are synthetic short gates. They cannot establish a 95% probability of
 multi-day stability or prove resistance to the Iranian upstream firewall. DCPI
 remains experimental; outer TCP's loss sensitivity remains documented. A later
-stable decision still needs field observations and successful exact-tag gates.
+release decision requires successful exact-source full gates; field observations
+remain necessary to assess long-duration behavior. The historical shorter
+comparison failure is retained in [validation history](stable-validation-history.md).

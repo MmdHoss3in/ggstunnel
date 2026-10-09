@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"sync"
 	"testing"
 	"time"
 )
@@ -49,6 +51,131 @@ func TestPersistentDeviceGenerationCancellationAndQueuedTraffic(t *testing.T) {
 	case <-physical.closed:
 	default:
 		t.Fatal("physical TUN leaked at shutdown")
+	}
+}
+
+type heldPacketDevice struct {
+	*packetDeviceFake
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (d *heldPacketDevice) Write(p []byte) (int, error) {
+	d.entered <- struct{}{}
+	select {
+	case <-d.release:
+		return d.packetDeviceFake.Write(p)
+	case <-d.closed:
+		return 0, io.EOF
+	}
+}
+
+func TestPersistentDeviceCancelledWriteRetainsOwnedBuffer(t *testing.T) {
+	physical := &heldPacketDevice{
+		packetDeviceFake: &packetDeviceFake{in: make(chan []byte), out: make(chan []byte, 2), closed: make(chan struct{})},
+		entered:          make(chan struct{}, 2), release: make(chan struct{}, 2),
+	}
+	bridge := newDeviceBridge(context.Background(), physical, newFairPacketQueue(), func() {})
+	defer bridge.Close()
+	first := bridge.generation(context.Background())
+	original := flowPacket(1, 1)
+	input := append([]byte(nil), original...)
+	done := make(chan error, 1)
+	go func() { _, err := first.Write(input); done <- err }()
+	select {
+	case <-physical.entered:
+	case <-time.After(time.Second):
+		t.Fatal("physical write did not start")
+	}
+	first.Close()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled generation remained blocked")
+	}
+	for i := range input {
+		input[i] = 0xff
+	}
+	second := bridge.generation(context.Background())
+	defer second.Close()
+	next := flowPacket(2, 2)
+	go func() { _, err := second.Write(next); done <- err }()
+	physical.release <- struct{}{}
+	select {
+	case got := <-physical.out:
+		if !bytes.Equal(got, original) {
+			t.Fatal("cancelled writer's leased packet was recycled or aliased")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first physical write stalled")
+	}
+	physical.release <- struct{}{}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("next generation stalled")
+	}
+	if got := <-physical.out; !bytes.Equal(got, next) {
+		t.Fatal("next packet corrupted")
+	}
+}
+
+func TestPersistentDeviceConcurrentPooledWriteIntegrity(t *testing.T) {
+	const count = 128
+	physical := &packetDeviceFake{in: make(chan []byte), out: make(chan []byte, count), closed: make(chan struct{})}
+	bridge := newDeviceBridge(context.Background(), physical, newFairPacketQueue(), func() {})
+	defer bridge.Close()
+	gen := bridge.generation(context.Background())
+	defer gen.Close()
+	var workers sync.WaitGroup
+	for i := 0; i < count; i++ {
+		workers.Add(1)
+		go func(i int) {
+			defer workers.Done()
+			p := flowPacket(uint16(i), uint16(i))
+			if n, err := gen.Write(p); err != nil || n != len(p) {
+				t.Errorf("write: %d %v", n, err)
+			}
+		}(i)
+	}
+	finished := make(chan struct{})
+	go func() { workers.Wait(); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("concurrent writes stalled")
+	}
+	seen := make(map[string]bool)
+	for i := 0; i < count; i++ {
+		seen[string(<-physical.out)] = true
+	}
+	for i := 0; i < count; i++ {
+		if !seen[string(flowPacket(uint16(i), uint16(i)))] {
+			t.Fatal("pooled write duplicated or corrupted", i)
+		}
+	}
+}
+
+func BenchmarkPersistentDeviceWrite(b *testing.B) {
+	physical := &packetDeviceFake{in: make(chan []byte), out: make(chan []byte, 1), closed: make(chan struct{})}
+	bridge := newDeviceBridge(context.Background(), physical, newFairPacketQueue(), func() {})
+	defer bridge.Close()
+	gen := bridge.generation(context.Background())
+	defer gen.Close()
+	packet := make([]byte, 1280)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := gen.Write(packet); err != nil {
+			b.Fatal(err)
+		}
+		<-physical.out
 	}
 }
 

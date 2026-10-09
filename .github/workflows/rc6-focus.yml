@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
-        mode: [renewal, path, performance]
+        mode: [renewal, path, performance-clean, performance-loss-forward, performance-loss-reverse]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     steps:
@@ -35,6 +35,8 @@ jobs:
           python3 scripts/check_version.py
           go test -race -tags audit -short -count=1 -timeout 5m ./...
           go test -race ./internal/engine ./internal/carrier ./internal/pathmtu -run '^Test(PersistentDevice|FairQueueExpir|PathProbe|PathReply|ProbeCorrelation|Recovery)' -count=10 -timeout 3m
+          mkdir -p extended-results
+          go test ./internal/engine -run '^$' -bench '^BenchmarkPersistentDeviceWrite$' -benchmem -count=3 | tee extended-results/bridge-benchmark.txt
           bash scripts/build-release.sh
           python3 -m unittest discover -s scripts -p 'test_*.py' -v
       - name: Native prescribed experiment

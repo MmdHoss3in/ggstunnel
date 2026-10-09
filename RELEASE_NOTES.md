@@ -1,5 +1,29 @@
 # Release notes
 
+## v0.3.4 — stable runtime, optional experimental path discovery
+
+Keep TUN/routes/forwards across transport generations, renew BIP/challenge
+identities every six hours, and discard expired queue entries before admitting
+fresh retries. Remove the extra TUN transmit copy and reuse receive write buffers
+and completion channels only after both caller and physical writer release them;
+cancellation cannot recycle a buffer still used by blocked I/O. Installer upgrade
+and rollback journals restore interrupted transactions on the next invocation.
+Option26/GGS6 exposes explicit settings while older join codes remain supported.
+
+Publication requires every old and new gate on this exact source commit, plus
+fail-closed verification of all164 RC6 native observations. Loss comparisons now
+use15-second warmup,45 measured seconds and five balanced pairs; clean cases keep
+the original recipe. Thresholds and the immutable RC5 baseline are unchanged.
+The previous failed baseline-variance comparison and measured AMD performance
+decrease remain in [validation history](docs/stable-validation-history.md).
+Actual tagged-build rates are appended automatically below after validation.
+
+Stable names the supported runtime and installer; authenticated PMTU remains
+off by default and experimental, as does DCPI. Renewal briefly pauses delivery
+and can lose in-flight UDP. No95%multiday stability, universal speed or firewall
+passage guarantee is claimed. Upgrade both peers; saved options16/21 persist.
+See [installation and tuning](README.md) and [behavior](docs/rc6-stability.md).
+
 ## v0.3.4-rc6 — unpublished validation candidate
 
 Retain the physical TUN, routes and forwarding listeners during authenticated

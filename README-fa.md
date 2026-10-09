@@ -1,6 +1,6 @@
 # ggstunnel — تانل رمز‌شدهٔ ایران ↔ خارج
 
-**v0.3.4-rc6 نامزد در حال آزمون است؛ هنوز منتشر نشده و Stable نیست.** [تغییرات، گزینهٔ ۲۶ و معیار آزمون](docs/rc6-stability.md). آخرین بستهٔ منتشرشده RC5 است؛ راهنمای نصب قبلی به همان تگ ثابت اشاره می‌کند.
+**v0.3.4 — نسخهٔ پایدار با انتشار مشروط به آزمون‌های کامل همان commit.** حفظ TUN و فورواردها هنگام بازیابی، تمدید نشست با کلید تازه، محدودیت عمر صف و بازیابی نصب قطع‌شده فعال‌اند. گزینهٔ ۲۶ قابلیت‌های جدید را تنظیم می‌کند؛ PMTU و DCPI همچنان انتخابی و آزمایشی‌اند. [رفتار و محدودیت‌ها](docs/rc6-stability.md) و [سابقهٔ مقایسه‌ها](docs/stable-validation-history.md). نصب از دستورات زیر پس از آماده‌شدن assetهای Release ممکن است؛ Stable تضمین چندروزه یا عبور از فایروال نیست.
 
 **v0.3.4-rc5 منتشر شد؛ Pre-release، نه Stable:** نشست opaque با challenge و کد GGS5، کنترل فشار صف ارسال، آمار UDP/raw، اصلاح تیونر BIP و تغییر ترنسپورت با گزینهٔ ۲۵ اضافه شده‌اند. تمام ۵۱ بخش اجرای نهایی تگ موفق‌اند. دو شکست مقایسهٔ سرعت در اجرای اول، بررسی نوسان و یک تأیید مجدد با همان معیارها در [سابقهٔ کامل آزمون](docs/rc5-validation-history.md) حفظ شده‌اند. تگ RC4 و قالب GGS4 قبلی ثابت‌اند.
 
@@ -31,11 +31,11 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4-rc5/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh install
 ```
 
-نصاب بستهٔ باینری و سورس را از [Release v0.3.4-rc5](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4-rc5) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند؛ نصب تا آماده‌شدن assetهای ریلیز ممکن نیست. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. ابتدا خارج و سپس ایران را ارتقا دهید. تنظیمات ذخیره‌شدهٔ ۱۶ و ۲۱ پابرجا می‌مانند؛ برای کانفیگ قدیمی BIP، گزینهٔ ۲۱ را یک بار در نسخهٔ جدید روی هر دو سمت اجرا کنید. این کار بعد از هر ری‌استارت لازم نیست و قالب opaque قبلی را خودکار به GGS5 تبدیل نمی‌کند.
+نصاب بستهٔ باینری و سورس را از [Release v0.3.4](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند؛ نصب تا آماده‌شدن assetهای ریلیز ممکن نیست. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. ابتدا خارج و سپس ایران را ارتقا دهید. تنظیمات ذخیره‌شدهٔ ۱۶ و ۲۱ پابرجا می‌مانند؛ برای کانفیگ قدیمی BIP، گزینهٔ ۲۱ را یک بار در نسخهٔ جدید روی هر دو سمت اجرا کنید. این کار بعد از هر ری‌استارت لازم نیست و قالب opaque قبلی را خودکار به GGS5 تبدیل نمی‌کند.
 
 **برای دفعات بعد فقط منو را باز کنید؛ هیچ نصب، دانلود یا بررسی پیش‌نیازی انجام نمی‌شود:**
 
@@ -53,7 +53,7 @@ sudo bash setup.sh menu
 
 ### نصب دستی یا آفلاین
 
-فایل‌های `ggstunnel-linux.tar.gz` و `SHA256SUMS` را از [Release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4-rc4) دانلود و کنار هم قرار دهید:
+فایل‌های `ggstunnel-linux.tar.gz` و `SHA256SUMS` را از [Release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4) دانلود و کنار هم قرار دهید:
 
 ```bash
 sha256sum -c SHA256SUMS
@@ -135,7 +135,7 @@ sudo ggstunnel diagnose all
 ## ارتقا و بازگشت
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4-rc5/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh update
 ```
 

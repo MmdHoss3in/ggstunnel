@@ -263,8 +263,18 @@ func (e *Engine) runWorkers(parent context.Context) error {
 }
 
 func (e *Engine) tunToCarrier(ctx context.Context) error {
-	_, bridged := e.tun.(*generationDevice)
-	if e.cfg.Profile == "bip" && !bridged {
+	if device, ok := e.tun.(*generationDevice); ok {
+		for {
+			packet, err := device.ReadPacket()
+			if err != nil {
+				return err
+			}
+			if err := e.sendPacket(ctx, packet); err != nil {
+				return err
+			}
+		}
+	}
+	if e.cfg.Profile == "bip" {
 		return e.fairTunToCarrier(ctx)
 	}
 	buf := make([]byte, 65535)

@@ -1,6 +1,6 @@
 # ggstunnel — تانل رمز‌شدهٔ ایران ↔ خارج
 
-**v0.3.4-rc6 در حال اعتبارسنجی است و هنوز Release یا Stable نیست.** نگه‌داشتن TUN و فورواردها هنگام بازیابی، تعویض دوره‌ای نشست‌های BIP/challenge، سقف عمر صف، کشف اختیاری اندازهٔ مسیر BIP/UDP و بازیابی نصب قطع‌شده در این نامزد اضافه شده‌اند. [رفتار و معیار آزمون RC6](docs/rc6-stability.md). آخرین بستهٔ منتشرشده همچنان RC5 است؛ دستورات نصب RC5 پایین، به همان تگ ثابت اشاره می‌کنند.
+**v0.3.4 — نسخهٔ پایدار با انتشار مشروط به آزمون‌های کامل همان commit.** TUN، مسیرها و فورواردها هنگام بازیابی حفظ می‌شوند؛ نشست‌های BIP/challenge به‌صورت دوره‌ای با کلید تازه تمدید می‌شوند. صف عمر محدود دارد، گزینهٔ ۲۶ کشف اختیاری اندازهٔ مسیر BIP/UDP را تنظیم می‌کند و نصب نیمه‌تمام قابل بازیابی است. کپی اضافهٔ خواندن TUN و تخصیص بافر/کانال در هر نوشتن حذف شده‌اند. [رفتار و محدودیت‌ها](docs/rc6-stability.md) و [سابقهٔ آزمون ناموفق و روش مقایسهٔ جدید](docs/stable-validation-history.md). دستورات زیر به تگ ثابت v0.3.4 اشاره می‌کنند؛ تا ایجاد assetهای Release نصب ممکن نیست. عنوان Stable به معنی تضمین چندروزه یا عبور از فایروال نیست؛ PMTU و DCPI همچنان انتخابی و آزمایشی‌اند.
 
 **v0.3.4-rc5 منتشر شد؛ Pre-release، نه Stable:** نشست opaque با challenge و کد GGS5، کنترل فشار صف ارسال، آمار UDP/raw، اصلاح تیونر BIP و تغییر ترنسپورت با گزینهٔ ۲۵ اضافه شده‌اند. تمام ۵۱ بخش اجرای نهایی تگ موفق‌اند. دو شکست مقایسهٔ سرعت در اجرای اول، بررسی نوسان و یک تأیید مجدد با همان معیارها در [سابقهٔ کامل آزمون](docs/rc5-validation-history.md) حفظ شده‌اند. تگ RC4 و قالب GGS4 قبلی ثابت‌اند.
 
@@ -31,11 +31,11 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4-rc5/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh install
 ```
 
-نصاب بستهٔ باینری و سورس را از [Release v0.3.4-rc5](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4-rc5) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند؛ نصب تا آماده‌شدن assetهای ریلیز ممکن نیست. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. ابتدا خارج و سپس ایران را ارتقا دهید. تنظیمات ذخیره‌شدهٔ ۱۶ و ۲۱ پابرجا می‌مانند؛ برای کانفیگ قدیمی BIP، گزینهٔ ۲۱ را یک بار در نسخهٔ جدید روی هر دو سمت اجرا کنید. این کار بعد از هر ری‌استارت لازم نیست و قالب opaque قبلی را خودکار به GGS5 تبدیل نمی‌کند.
+نصاب بستهٔ باینری و سورس را از [Release v0.3.4](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند؛ نصب تا آماده‌شدن assetهای ریلیز ممکن نیست. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. ابتدا خارج و سپس ایران را ارتقا دهید. تنظیمات ذخیره‌شدهٔ ۱۶ و ۲۱ پابرجا می‌مانند؛ برای کانفیگ قدیمی BIP، گزینهٔ ۲۱ را یک بار در نسخهٔ جدید روی هر دو سمت اجرا کنید. این کار بعد از هر ری‌استارت لازم نیست و قالب opaque قبلی را خودکار به GGS5 تبدیل نمی‌کند.
 
 **برای دفعات بعد فقط منو را باز کنید؛ هیچ نصب، دانلود یا بررسی پیش‌نیازی انجام نمی‌شود:**
 
@@ -53,7 +53,7 @@ sudo bash setup.sh menu
 
 ### نصب دستی یا آفلاین
 
-فایل‌های `ggstunnel-linux.tar.gz` و `SHA256SUMS` را از [Release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4-rc4) دانلود و کنار هم قرار دهید:
+فایل‌های `ggstunnel-linux.tar.gz` و `SHA256SUMS` را از [Release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4) دانلود و کنار هم قرار دهید:
 
 ```bash
 sha256sum -c SHA256SUMS
@@ -135,7 +135,7 @@ sudo ggstunnel diagnose all
 ## ارتقا و بازگشت
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4-rc5/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh update
 ```
 
