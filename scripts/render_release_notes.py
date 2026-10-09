@@ -111,4 +111,6 @@ from rc5_report import report as rc5_report
 notes += rc5_report(root/'rc5-collected', os.environ['GITHUB_SHA'])
 from rc6_report import report as rc6_report
 notes += rc6_report(root/'rc6-collected', os.environ['GITHUB_SHA'])
+from queue_pressure_report import report as queue_report
+notes += queue_report(root/'queue-collected', os.environ['GITHUB_SHA'])
 (root/'artifacts/release-notes.md').write_text(notes)

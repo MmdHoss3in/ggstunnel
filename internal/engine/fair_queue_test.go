@@ -22,6 +22,7 @@ func flowPacket(port, seq uint16) []byte {
 
 func TestFairQueueRetainsSparseFlowAcrossBulkOverflow(t *testing.T) {
 	q := newFairPacketQueue()
+	q.now = func() time.Time { return time.Unix(10, 0) }
 	for i := 0; i < fairPacketsPerFlow; i++ {
 		if !q.push(flowPacket(1, uint16(i))) {
 			t.Fatal("early overflow")

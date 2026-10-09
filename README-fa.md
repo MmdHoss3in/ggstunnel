@@ -1,5 +1,7 @@
 # ggstunnel — تانل رمز‌شدهٔ ایران ↔ خارج
 
+**v0.3.5 — اصلاح فشار صف ارسال:** صف هر جریان ظرفیت پایهٔ ۱۲۸ بسته دارد و برای burst کوتاه می‌تواند تا ۵۱۲ بسته رشد کند؛ سقف حافظهٔ مشترک ۸MiB حفظ می‌شود. آمار علت حذف، اشغال صف و زمان انتظار اضافه شده‌اند. قالب، MTU و تنظیمات میزبان عوض نمی‌شوند. انتشار بسته به پاس‌شدن تمام گیت‌های قبلی و مقایسهٔ فشار/تأخیر با v0.3.4 وابسته است. [رفتار، محدودیت‌ها و آزمون‌ها](docs/queue-pressure.md).
+
 **[v0.3.4 Stable منتشر شد](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4).** حفظ TUN و فورواردها هنگام بازیابی، تمدید نشست با کلید تازه، محدودیت عمر صف و بازیابی نصب قطع‌شده فعال‌اند. گزینهٔ ۲۶ قابلیت‌های جدید را تنظیم می‌کند؛ PMTU و DCPI همچنان انتخابی و آزمایشی‌اند. [رفتار و محدودیت‌ها](docs/rc6-stability.md) و [سابقهٔ مقایسه‌ها](docs/stable-validation-history.md). با دستورات زیر می‌توانید نصب یا ارتقا دهید؛ Stable تضمین چندروزه یا عبور از فایروال نیست.
 
 تمام **۶۱ job** در [اولین اجرای تگ](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37919838754/attempts/1) برای سورس `ac5f73d013b51a574335e5e4bd301e73505d01d6` پاس شدند. ماتریس گسترده ۵۱۲ مشاهده و گیت جدید ۱۶۴ مشاهدهٔ کامل دارد. بار ثابت ده‌دقیقه‌ای BIP روی لینک ۵۰۰Mbps/RTT80ms با هشت جریان TCP، حدود **۴۱۹٫۹Mbps** روی هر دو معماری و حداکثر RSS برابر **۳۰٫۶/۲۷٫۳MiB** ثبت کرد؛ افت دیرهنگام دیده نشد. مقایسهٔ کوتاه‌تر ۱۶جریانی روی AMD هنوز ۳٫۴ تا ۴٫۱٪ پایین‌تر از RC5 بود و ARM تقریباً برابر. [جزئیات و داده‌های خام](docs/stable-validation-history.md) و [سابقهٔ شکست قبلی](https://github.com/MmdHoss3in/ggstunnel/releases/download/v0.3.4/stable-validation-history.zip) حفظ شده‌اند.
@@ -33,7 +35,7 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.5/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh install
 ```
 
@@ -137,7 +139,7 @@ sudo ggstunnel diagnose all
 ## ارتقا و بازگشت
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.4/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.5/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh update
 ```
 

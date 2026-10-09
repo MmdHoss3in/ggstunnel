@@ -1,3 +1,11 @@
+# v0.3.5 — bounded burst queues
+
+Local queue admission loss under bursty four-stream TCP load is reduced by a bounded young-burst reservoir. The base remains 128 packets per flow; up to 512 are admitted only while the oldest waiting packet is younger than 20ms. Shared queued payload remains bounded by 8MiB. Metadata rings grow on demand, FIFO and round-robin service are retained, and sustained overload still drops.
+
+Additive telemetry separates per-flow, byte-budget, flow-count and closed-queue rejection, counts physical TUN ingress before admission, and exposes queue high-water values, burst admission and dequeue sojourn. No wire, MTU, cryptographic, firewall, join-code or tuning-policy changes. Upgrade both endpoints; saved options 16/21 remain valid. [Behavior and frozen qualification](docs/queue-pressure.md).
+
+Publication requires every historical gate plus complete native amd64/arm64 paired pressure, latency, CPU, resource and overload evidence against immutable v0.3.4. Passing short cloud recipes does not guarantee acceleration on every WAN or multiday stability.
+
 # Release notes
 
 ## v0.3.4 — stable runtime, optional experimental path discovery

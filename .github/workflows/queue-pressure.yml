@@ -1,0 +1,38 @@
+name: Queue pressure qualification
+on:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  pressure:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - name: Review and repeat admission and ownership regressions
+        run: |
+          test -z "$(gofmt -l cmd internal)"
+          go vet ./...
+          go test -race ./internal/engine -run '^Test(QueuePressure|FairQueue|PersistentDevice)' -count=10 -timeout 3m
+          bash scripts/build-release.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y iperf3 ethtool iptables
+      - name: Fixed paired pressure and latency measurements against v0.3.4
+        run: sudo env GITHUB_ACTIONS=true python3 scripts/queue_pressure.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: queue-pressure-${{ matrix.runner }}
+          path: extended-results/

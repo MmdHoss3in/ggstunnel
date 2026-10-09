@@ -13,6 +13,7 @@ import (
 
 // Telemetry contains no PSK, session identity, public address or config dump.
 type Telemetry struct {
+	QueueTelemetry
 	Recoveries             uint64                 `json:"internal_recoveries"`
 	Goroutines             int                    `json:"goroutines"`
 	HeapAllocBytes         uint64                 `json:"heap_alloc_bytes"`
@@ -53,6 +54,9 @@ func (e *Engine) SnapshotTelemetry(now time.Time) Telemetry {
 		QueueExpired:  e.queueExpired.Load(),
 		Replays:       e.replays.Load(), AuthenticationFailures: e.authFails.Load(), Malformed: e.malformed.Load()}
 	s.WireMode = e.cfg.Transport.WireMode
+	if e.packetQueue != nil {
+		s.QueueTelemetry = e.packetQueue.snapshot()
+	}
 	s.EffectivePayload, s.OuterMTU = e.effectivePayload.Load(), e.outerMTU.Load()
 	if state := e.pathState.Load(); state != nil {
 		s.PathMTUState = state.(string)

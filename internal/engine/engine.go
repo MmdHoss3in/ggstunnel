@@ -49,6 +49,7 @@ type Engine struct {
 	effectivePayload atomic.Int64
 	outerMTU         atomic.Int64
 	queueExpired     atomic.Uint64
+	packetQueue      *fairPacketQueue
 	pathState        atomic.Value
 	pathReplies      chan []byte
 }
@@ -117,6 +118,9 @@ func (e *Engine) Run(ctx context.Context) error {
 	q := newFairPacketQueue()
 	q.maxAge = time.Duration(e.cfg.Performance.QueueMaxAgeMS) * time.Millisecond
 	q.expired = func() { e.queueExpired.Add(1); e.drops.Add(1); e.tunQueueDrops.Add(1) }
+	e.transportMu.Lock()
+	e.packetQueue = q
+	e.transportMu.Unlock()
 	bridge := newDeviceBridge(ctx, d, q, func() { e.drops.Add(1); e.tunQueueDrops.Add(1) })
 	defer bridge.Close()
 	for {
