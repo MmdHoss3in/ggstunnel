@@ -53,3 +53,32 @@ The full release pipeline reruns all historical gates and the164-observation
 RC6 gate on one exact commit, revalidates the raw results before creating assets,
 and attaches them to the release. Passing remains short synthetic evidence;
 real Iran–outside multi-day behavior and firewall blocking need field observations.
+
+## Published exact-source results
+
+[v0.3.4](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.4) was published
+2026-10-09 from ac5f73d013b51a574335e5e4bd301e73505d01d6. All 61 jobs passed in
+[attempt 1](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37919838754/attempts/1)
+without a test rerun, tag movement or criterion relaxation. Extended observations
+were complete (512, zero failed/target-missed rows); all 164 RC6 records passed.
+RC5 baseline CV never exceeded 5.953%; paired geometric ratios were 95.899–103.237%.
+The formerly noisy AMD 1%-reverse case now had baseline CV 3.540%, geometric ratio
+102.182% and candidate receiver rates 132.027–149.362Mbps across five fixed pairs.
+
+AMD clean 500Mbps paired ratios remained 95.899/96.644% (a 3.36–4.10% decrease),
+inside the unchanged 90% gate. ARM ratios were 100.297/99.609%. This does not
+support a blanket claim that all performance regression has been removed.
+
+The independent 10-minute 500Mbps/80ms BIP case used eight streams and 15-second
+warmup: AMD 419.906Mbps, ARM 419.904Mbps; minute medians near 421Mbps, unchanged
+processes, zero kernel TUN TX drops and no late decline. Maximum RSS was
+30.621/27.344MiB. Both 15-minute mixed resource tests passed with stable FD counts;
+their intentionally oversubscribed UDP phases have packet drops, so no universal
+zero-loss claim is made. These cases differ from the short 16-stream comparisons.
+
+The release contains all current native raw reports and the separately attached
+[original RC6 failure history](https://github.com/MmdHoss3in/ggstunnel/releases/download/v0.3.4/stable-validation-history.zip).
+Downloaded archive SHA256:
+`bfd796fc81abd294ba43b653fe0a5bbd8776cddaba926219b0678c79c78e73b8`.
+The archive and 204 inner manifest checks matched; both ELF architectures and
+embedded version 0.3.4 were inspected without local binary execution.

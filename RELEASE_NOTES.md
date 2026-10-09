@@ -2,6 +2,16 @@
 
 ## v0.3.4 — stable runtime, optional experimental path discovery
 
+Published 2026-10-09 from immutable source
+`ac5f73d013b51a574335e5e4bd301e73505d01d6`: all 61 jobs passed in
+[tagged attempt 1](https://github.com/MmdHoss3in/ggstunnel/actions/runs/37919838754/attempts/1).
+All 512 extended and 164 RC6 observations were complete. The 10-minute 500Mbps
+BIP hold measured 419.906/419.904Mbps amd64/arm64, maximum RSS30.621/27.344MiB,
+unchanged processes and no late decline. Both 15-minute resource gates passed.
+AMD short 500Mbps paired comparisons still showed a 3.36–4.10% decrease against
+RC5; ARM was essentially unchanged. No universal improvement is claimed.
+The earlier failed comparison is retained as `stable-validation-history.zip`.
+
 Keep TUN/routes/forwards across transport generations, renew BIP/challenge
 identities every six hours, and discard expired queue entries before admitting
 fresh retries. Remove the extra TUN transmit copy and reuse receive write buffers
