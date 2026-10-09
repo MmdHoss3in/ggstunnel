@@ -13,6 +13,7 @@ import (
 
 	"ggstunnel/internal/config"
 	"ggstunnel/internal/frame"
+	"ggstunnel/internal/pathmtu"
 )
 
 // This is a private PSK carrier format, not QUIC or TLS. AES-based ciphertext
@@ -195,9 +196,14 @@ func (b *BIP) encodeCompact(p wirePacket) ([]byte, error) {
 			plain = binary.BigEndian.AppendUint32(plain, p.token)
 		}
 	}
+	if p.kind == bipKindFastProbe {
+		p.payload = payload
+		payload = probePayload(p, 20+compactPrefix+16+len(plain)+1)
+	}
 	plain = append(plain, payload...)
 	padding := byte(0)
-	if p.kind != bipKindData {
+	_, sizeProbe := pathmtu.Size(p.payload)
+	if p.kind != bipKindData && !(p.kind == bipKindFastProbe && sizeProbe) {
 		var random [16]byte
 		if _, err := rand.Read(random[:]); err != nil {
 			return nil, err

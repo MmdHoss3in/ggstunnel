@@ -1,5 +1,21 @@
 # Release notes
 
+## v0.3.4-rc6 — unpublished validation candidate
+
+Retain the physical TUN, routes and forwarding listeners during authenticated
+transport recovery. BIP/challenge sessions renew every six hours by default,
+using fresh identities and keys, with a bounded authentication pause. This is
+transport renewal, not dual-key seamless rekey; in-flight UDP may be lost.
+Bound the outgoing fair queue to 8MiB, 1024 flows, 128 packets per flow and a
+default five-second age. Expiry is counted separately in telemetry.
+
+Optional authenticated directional packet-size discovery for BIP and UDP is
+available in option 26/GGS6. Probes do not enter BIP's reliable DATA sequence;
+compact probes cover the exact IPv4 size including SACK, and UDP uses DF.
+Old GGS2–GGS5 formats remain accepted. Installer upgrades/rollbacks now retain
+a durable rollback journal and recover interrupted updates on the next manager
+invocation. See [criteria and limits](docs/rc6-stability.md).
+
 ## v0.3.4-rc5 — prerelease candidate with challenge-bound sessions
 
 Published from immutable source `aab18976517393dc87a1437eceaca63169ccee66` after

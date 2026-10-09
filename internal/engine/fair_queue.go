@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"time"
 )
 
 const fairFlows = 1024
@@ -37,6 +38,7 @@ func packetFlow(p []byte) (k flowKey) {
 
 type packetFlowQueue struct {
 	packets     [fairPacketsPerFlow][]byte
+	queuedAt    [fairPacketsPerFlow]time.Time
 	head, count int
 }
 
@@ -47,10 +49,13 @@ type fairPacketQueue struct {
 	head, count, bytes int
 	wake               chan struct{}
 	err                error
+	maxAge             time.Duration
+	now                func() time.Time
+	expired            func()
 }
 
 func newFairPacketQueue() *fairPacketQueue {
-	return &fairPacketQueue{flows: make(map[flowKey]*packetFlowQueue), wake: make(chan struct{}, 1)}
+	return &fairPacketQueue{flows: make(map[flowKey]*packetFlowQueue), wake: make(chan struct{}, 1), now: time.Now}
 }
 
 // A full flow drops its newest packet without displacing other flows. Reads
@@ -87,6 +92,7 @@ func (q *fairPacketQueue) push(p []byte) bool {
 		q.count++
 	}
 	f.packets[(f.head+f.count)%fairPacketsPerFlow] = append([]byte(nil), p...)
+	f.queuedAt[(f.head+f.count)%fairPacketsPerFlow] = q.now()
 	f.count++
 	q.bytes += len(p)
 	select {
@@ -126,7 +132,9 @@ func (q *fairPacketQueue) pop(ctx context.Context) ([]byte, error) {
 			q.count--
 			f := q.flows[k]
 			p := f.packets[f.head]
+			stale := q.maxAge > 0 && q.now().Sub(f.queuedAt[f.head]) >= q.maxAge
 			f.packets[f.head] = nil
+			f.queuedAt[f.head] = time.Time{}
 			f.head = (f.head + 1) % fairPacketsPerFlow
 			f.count--
 			q.bytes -= len(p)
@@ -135,6 +143,12 @@ func (q *fairPacketQueue) pop(ctx context.Context) ([]byte, error) {
 				q.count++
 			}
 			q.mu.Unlock()
+			if stale {
+				if q.expired != nil {
+					q.expired()
+				}
+				continue
+			}
 			return p, nil
 		}
 		q.mu.Unlock()

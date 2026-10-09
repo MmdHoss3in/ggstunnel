@@ -48,6 +48,7 @@ def atomic(path, data, mode=0o600):
             f.flush()
             os.fsync(f.fileno())
         os.replace(name, path)
+        sync_directory(path.parent)
     finally:
         if os.path.exists(name): os.unlink(name)
 
@@ -141,24 +142,32 @@ def encode_join(c):
     if opaque: data.update(v=4, wire='opaque')
     challenge = opaque and c['transport'].get('opaque_session') == 'challenge'
     if challenge: data.update(v=5, session='challenge')
+    extended=bool(c['transport'].get('path_mtu') or c['transport'].get('session_max_age_sec') or c['performance'].get('queue_max_age_ms'))
+    if extended:data.update(v=6,wire='compact' if compact else 'opaque' if opaque else 'legacy',session='challenge' if challenge else '',path_mtu=bool(c['transport'].get('path_mtu')),session_max_age_sec=c['transport'].get('session_max_age_sec',0),queue_max_age_ms=c['performance'].get('queue_max_age_ms',5000))
     raw = json.dumps(data, sort_keys=True, separators=(',', ':')).encode()
-    return ('GGS5.' if challenge else 'GGS4.' if opaque else 'GGS3.' if compact else 'GGS2.') + base64.urlsafe_b64encode(raw).decode().rstrip('=') + '.' + hashlib.sha256(raw).hexdigest()[:16]
+    return ('GGS6.' if extended else 'GGS5.' if challenge else 'GGS4.' if opaque else 'GGS3.' if compact else 'GGS2.') + base64.urlsafe_b64encode(raw).decode().rstrip('=') + '.' + hashlib.sha256(raw).hexdigest()[:16]
 
 def decode_join(token, local=None):
     if len(token) > 4096: raise ValueError('Join code too long')
     prefix, encoded, digest = token.strip().split('.')
-    if prefix not in ('GGS2','GGS3','GGS4','GGS5'): raise ValueError('Unknown join code format')
+    if prefix not in ('GGS2','GGS3','GGS4','GGS5','GGS6'): raise ValueError('Unknown join code format')
     raw = base64.b64decode(encoded + '=' * (-len(encoded) % 4), altchars=b'-_', validate=True)
     if not secrets.compare_digest(hashlib.sha256(raw).hexdigest()[:16], digest): raise ValueError('Join code checksum mismatch')
     d = json.loads(raw)
     fields = {'v','index','profile','server','peer','port','psk','mtu','payload'}
     compact, opaque, challenge = prefix=='GGS3', prefix in ('GGS4','GGS5'), prefix=='GGS5'
+    extended=prefix=='GGS6'
+    if extended:
+        compact,opaque,challenge=d.get('wire')=='compact',d.get('wire')=='opaque',d.get('session')=='challenge'
     expected = fields | ({'wire','session'} if challenge else {'wire'} if compact or opaque else set())
-    if set(d) != expected or d['v'] != (5 if challenge else 4 if opaque else 3 if compact else 2):
+    if extended:expected=fields|{'wire','session','path_mtu','session_max_age_sec','queue_max_age_ms'}
+    if set(d) != expected or d['v'] != (6 if extended else 5 if challenge else 4 if opaque else 3 if compact else 2):
         raise ValueError('Unsupported join data')
     if compact and (d['profile']!='bip' or d['wire']!='compact'): raise ValueError('Unsupported compact join mode')
     if opaque and (d['profile']=='bip' or d['wire']!='opaque'): raise ValueError('Unsupported opaque join mode')
     if challenge and d['session'] != 'challenge': raise ValueError('Unsupported session lifecycle')
+    if extended and (d['wire'] not in ('legacy','compact','opaque') or d['session'] not in ('','challenge') or challenge and not opaque):raise ValueError('Unsupported extended wire/session')
+    if extended and (type(d['path_mtu']) is not bool or type(d['session_max_age_sec']) is not int or type(d['queue_max_age_ms']) is not int):raise ValueError('Invalid extended setting types')
     if d['profile']=='dcpi' and not opaque: raise ValueError('DCPI requires a GGS4 or GGS5 opaque join code')
     c = make_config(d['index'], d['profile'], d['server'], d['peer'], d['port'], d['psk'], 'client', local)
     c['tun']['mtu'] = integer(d['mtu'], 576, 1500)
@@ -168,6 +177,12 @@ def decode_join(token, local=None):
     # GGS4 explicitly retains RC4 v1, even for DCPI. Never silently upgrade it.
     if challenge: c['transport']['opaque_session']='challenge'
     else: c['transport'].pop('opaque_session',None)
+    if extended:
+        age=integer(d['session_max_age_sec'],0,86400)
+        if age and (age<30 or c['profile']!='bip' and not challenge):raise ValueError('Invalid session renewal interval')
+        if d['path_mtu'] and (c['profile'] not in ('bip','udp') or c['profile']=='udp' and not challenge):raise ValueError('Unsupported path MTU mode')
+        c['transport'].update(path_mtu=d['path_mtu'],session_max_age_sec=age)
+        c['performance']['queue_max_age_ms']=integer(d['queue_max_age_ms'],100,30000)
     return c
 
 def active(name): return run(['systemctl', 'is-active', '--quiet', unit(name)], check=False).returncode == 0
@@ -500,6 +515,7 @@ WantedBy=multi-user.target
 
 def symlink(target,path):
     tmp=path.with_name(path.name+'.new');tmp.unlink(missing_ok=True);tmp.symlink_to(target);os.replace(tmp,path)
+    sync_directory(path.parent)
 
 def restore_unit(path, content):
     if content is None:path.unlink(missing_ok=True)
@@ -526,6 +542,7 @@ def verify_package(source, a):
     return listed, exe
 
 def install(source):
+    recover_install_transaction()
     source=Path(source).resolve();a=arch()
     listed,exe=verify_package(source,a);manifest=source/'SHA256SUMS'
     os.chmod(exe,0o755)
@@ -559,26 +576,22 @@ def install(source):
     if previous and old_unit is not None and not (previous/'ggstunnel@.service').exists():
         atomic(previous/'ggstunnel@.service',old_unit,0o644)
     atomic(release/'ggstunnel@.service',new_unit,0o644)
+    begin_install_transaction(running)
     try:
         atomic(unit_path,new_unit,0o644)
         symlink(release,OPT/'current')
         atomic(WRAPPER, '#!/bin/sh\nexec python3 /opt/ggstunnel/current/scripts/manage.py "$@"\n',0o755)
         run(['systemctl','daemon-reload'])
         for n in running:action('restart',n)
-    except Exception:
-        if previous:symlink(previous,OPT/'current')
-        else:(OPT/'current').unlink(missing_ok=True)
-        restore_unit(unit_path,old_unit)
-        if old_wrapper is None: WRAPPER.unlink(missing_ok=True)
-        else: atomic(WRAPPER,old_wrapper,old_wrapper_mode)
-        run(['systemctl','daemon-reload'],check=False)
-        if previous:
-            for n in running:run(['systemctl','restart',unit(n)],check=False)
+        if previous and previous!=release:symlink(previous,OPT/'previous')
+        finish_install_transaction()
+    except BaseException:
+        recover_install_transaction()
         raise
-    if previous and previous!=release:symlink(previous,OPT/'previous')
     print('Installed',release_version,'Run: sudo ggstunnel')
 
 def rollback():
+    recover_install_transaction()
     target=OPT/'previous'
     if not target.exists():raise ValueError('No previous installed release')
     previous=target.resolve();current=(OPT/'current').resolve()
@@ -587,24 +600,81 @@ def rollback():
     unit_path=UNITS/'ggstunnel@.service'
     old_unit=unit_path.read_text() if unit_path.exists() else None
     saved_unit=previous/'ggstunnel@.service'
+    begin_install_transaction(running)
     try:
         if saved_unit.exists():restore_unit(unit_path,saved_unit.read_text())
         symlink(previous,OPT/'current')
         run(['systemctl','daemon-reload'])
         for n in running:action('restart',n)
-    except Exception:
-        symlink(current,OPT/'current')
-        restore_unit(unit_path,old_unit)
-        run(['systemctl','daemon-reload'],check=False)
-        for n in running:run(['systemctl','restart',unit(n)],check=False)
+        symlink(current,OPT/'previous')
+        finish_install_transaction()
+    except BaseException:
+        recover_install_transaction()
         raise
-    symlink(current,OPT/'previous');print('Rolled back executable/manager/service unit; configuration retained')
+    print('Rolled back executable/manager/service unit; configuration retained')
+
+def sync_directory(path):
+    fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(fd)
+    finally:os.close(fd)
+
+def begin_install_transaction(running):
+    path=OPT/'install-transaction.json'
+    if path.exists():raise ValueError('Unrecovered installation transaction')
+    unit_path=UNITS/'ggstunnel@.service'
+    data=dict(schema=1,running=running,
+        current=str((OPT/'current').resolve()) if (OPT/'current').exists() else None,
+        previous=str((OPT/'previous').resolve()) if (OPT/'previous').exists() else None,
+        unit=unit_path.read_text() if unit_path.exists() else None,
+        wrapper=WRAPPER.read_text() if WRAPPER.exists() else None,
+        wrapper_mode=(WRAPPER.stat().st_mode&0o777) if WRAPPER.exists() else 0o755)
+    atomic(path,json.dumps(data))
+    sync_directory(OPT)
+
+def finish_install_transaction():
+    # Commit pointer changes before removing the durable rollback record.
+    sync_directory(OPT)
+    if UNITS.exists():sync_directory(UNITS)
+    if WRAPPER.parent.exists():sync_directory(WRAPPER.parent)
+    (OPT/'install-transaction.json').unlink()
+    sync_directory(OPT)
+
+def recover_install_transaction():
+    path=OPT/'install-transaction.json'
+    if not path.exists():return
+    data=json.loads(path.read_text())
+    if data.get('schema')!=1:raise ValueError('Unsupported installation transaction')
+    if not isinstance(data.get('running'),list) or len(data['running'])>168:raise ValueError('Invalid installation recovery services')
+    for name in data['running']:name_ok(name)
+    if type(data.get('wrapper_mode')) is not int or not 0<=data['wrapper_mode']<=0o777:raise ValueError('Invalid wrapper recovery permissions')
+    if any(data.get(key) is not None and not isinstance(data[key],str) for key in ('unit','wrapper')):raise ValueError('Invalid installation recovery content')
+    targets={}
+    for key in ('current','previous'):
+        target=data[key]
+        if target is not None:
+            resolved=Path(target).resolve(strict=True)
+            if resolved.parent!=(OPT/'releases').resolve():raise ValueError('Unsafe installation recovery target')
+            targets[key]=resolved
+        else:targets[key]=None
+    for key,target in targets.items():
+        if target is not None:symlink(target,OPT/key)
+        else:(OPT/key).unlink(missing_ok=True)
+    restore_unit(UNITS/'ggstunnel@.service',data['unit'])
+    if data['wrapper'] is None:WRAPPER.unlink(missing_ok=True)
+    else:atomic(WRAPPER,data['wrapper'],data['wrapper_mode'])
+    result=run(['systemctl','daemon-reload'],check=False)
+    if result.returncode:raise RuntimeError('Restored installation files but systemd reload failed; recovery journal retained')
+    if data['current']:
+        for name in data['running']:action('restart',name_ok(name))
+    finish_install_transaction()
+    print('Recovered interrupted installation; previous release restored')
 
 @contextlib.contextmanager
 def locked():
     ROOT.mkdir(mode=0o700,parents=True,exist_ok=True)
     with (ROOT/'manager.lock').open('a') as f:
         fcntl.flock(f,fcntl.LOCK_EX)
+        recover_install_transaction()
         yield
 
 def ask(label,default=''):
@@ -613,7 +683,7 @@ def ask(label,default=''):
 
 def menu():
     while True:
-        print('\nGGSTUNNEL '+VERSION+'\n1 Create Iran tunnel  2 Join from foreign  3 Status\n4 Start temporarily  5 Stop temporarily  6 Restart\n7 ON + boot enable  8 OFF + boot disable  9 Edit / forwards / restore config\n10 Delete tunnel  11 Show join code  12 Logs  13 Diagnostic report\n14 Capacity listener  15 Capacity test  16 Apply network tuning\n17 Restore tuning  18 Update from extracted package  19 Rollback release\n20 Sustained capacity test (10 minutes each direction/protocol)\n21 Apply BIP performance defaults to existing tunnels\n22 Experimental BIP wire mode / payload\n23 Experimental non-BIP opaque + challenge format\n24 Short TUN path / size diagnostic\n25 Change transport, retain TUN addresses and forwards\n0 Exit\nActions 4-8 accept tunnel name or all. Temporary stop lasts until manual start or reboot.')
+        print('\nGGSTUNNEL '+VERSION+'\n1 Create Iran tunnel  2 Join from foreign  3 Status\n4 Start temporarily  5 Stop temporarily  6 Restart\n7 ON + boot enable  8 OFF + boot disable  9 Edit / forwards / restore config\n10 Delete tunnel  11 Show join code  12 Logs  13 Diagnostic report\n14 Capacity listener  15 Capacity test  16 Apply network tuning\n17 Restore tuning  18 Update from extracted package  19 Rollback release\n20 Sustained capacity test (10 minutes each direction/protocol)\n21 Apply BIP performance defaults to existing tunnels\n22 Experimental BIP wire mode / payload\n23 Experimental non-BIP opaque + challenge format\n24 Short TUN path / size diagnostic\n25 Change transport, retain TUN addresses and forwards\n26 Session renewal / queue age / authenticated path MTU\n0 Exit\nActions 4-8 accept tunnel name or all. Temporary stop lasts until manual start or reboot.')
         try: choice=ask('Choice')
         except (EOFError, KeyboardInterrupt): print(); return
         if choice=='0':return
@@ -641,6 +711,7 @@ def menu():
                 elif choice=='23':configure_opaque(select_name())
                 elif choice=='24':path_test(select_name())
                 elif choice=='25':configure_transport(select_name())
+                elif choice=='26':configure_stability(select_name())
                 elif choice=='20':capacity(select_name(),'client',(integer(ask('Rate Mbps','100'),1,1000),),600)
                 else: raise ValueError('Unknown menu option')
             if choice == '18':
@@ -652,7 +723,7 @@ def configure_wire(name):
     c=configs()[name]
     if c['profile']!='bip':raise ValueError('Compact wire is currently available for BIP only')
     print('Experimental compact mode requires the same mode on both updated peers; switching one side interrupts traffic.')
-    print('Legacy 1348 requires outer MTU 1500. No automatic PMTU discovery. Default 1280 is safer.')
+    print('Legacy 1348 requires outer MTU 1500. Payload 1280 remains the default; optional authenticated path discovery is configured separately in option 26 on updated peers.')
     print('Compact filters redundant kernel echoes by authenticated peer alias; ordinary ping and real tunnel replies pass. Check kernel_echo_filter telemetry.')
     print('Compact is experimental. Measure path throughput and NIC/application overhead before production rollout.')
     mode=ask('Wire mode: legacy / compact',c['transport'].get('bip_wire_mode') or 'legacy')
@@ -675,6 +746,8 @@ def configure_opaque(name):
     else:
         c['transport'].pop('wire_mode',None)
         c['transport'].pop('opaque_session',None)
+        c['transport'].pop('session_max_age_sec',None)
+        c['transport'].pop('path_mtu',None)
     save_config(c,True)
     if c['role']=='server':print('Replace the foreign config with this SECRET join code:\n'+encode_join(c))
 
@@ -686,7 +759,7 @@ def configure_transport(name):
     c['transport']=transport=dict(c.get('transport') or {})
     c['tuner']=dict(c.get('tuner') or {})
     for key in list(transport):
-        if key.startswith('bip_') or key in ('wire_mode','opaque_session'):
+        if key.startswith('bip_') or key in ('wire_mode','opaque_session','session_max_age_sec','path_mtu'):
             transport.pop(key)
     c['profile']=profile
     if profile=='bip':
@@ -705,6 +778,19 @@ def configure_transport(name):
     save_config(c,True)
     print('Saved locally; confirm matching profile/wire/session settings on the peer and allow the carrier in host/provider firewalls.')
     if c['role']=='server':print('SECRET join code (contains PSK):\n'+encode_join(c))
+
+def configure_stability(name):
+    c=configs()[name]
+    modern=c['profile']=='bip' or c['transport'].get('opaque_session')=='challenge'
+    print('Session renewal retains TUN/routes/forward listeners; authentication briefly pauses traffic. Queues are bounded; expired packets are dropped. This does not bypass a blocked protocol.')
+    if modern:c['transport']['session_max_age_sec']=integer(ask('Session renewal seconds (30..86400)',str(c['transport'].get('session_max_age_sec') or 21600)),30,86400)
+    c['performance']['queue_max_age_ms']=integer(ask('Maximum queued packet age ms',str(c['performance'].get('queue_max_age_ms') or 5000)),100,30000)
+    if c['profile']=='bip' or c['profile']=='udp' and modern:
+        value=ask('Authenticated directional path MTU: on / off','on' if c['transport'].get('path_mtu') else 'off')
+        if value not in ('on','off'):raise ValueError('Use on or off')
+        c['transport']['path_mtu']=value=='on'
+    save_config(c,True)
+    if c['role']=='server':print('Updated peer must understand GGS6; SECRET join code:\n'+encode_join(c))
 
 def path_test(name):
     c=configs()[name]
