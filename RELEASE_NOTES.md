@@ -4,7 +4,7 @@ BIP receives a bounded young-burst reservoir to absorb transient queue pressure;
 
 Additive telemetry separates per-flow, byte-budget, flow-count and closed-queue rejection, counts physical TUN ingress before admission, and exposes queue high-water values, burst admission and dequeue sojourn. No wire, MTU, cryptographic, firewall, join-code or tuning-policy changes. Upgrade both endpoints; saved options 16/21 remain valid. [Behavior and frozen qualification](docs/queue-pressure.md). [Retained failed v0.3.5 candidate and qualification correction](docs/queue-validation-history.md).
 
-Publication requires every historical gate plus complete native amd64/arm64 paired pressure, latency, CPU, resource and overload evidence against immutable v0.3.4. Passing short cloud recipes does not guarantee acceleration on every WAN or multiday stability.
+Published 2026-10-09 from exact source `d8d88f7b89dc25660f318fb4f6d0617db86c464f` after all 63 final jobs passed. All 58 native pressure observations passed. Initial 4s compact and 30s ARM 1% loss comparisons failed; independent compact and repeated longer loss gates passed. Only the two failed jobs and release dependencies were rerun once with unchanged code and criteria. Original failures and the unpublished v0.3.5 study are retained as [queue-validation-history.zip](https://github.com/MmdHoss3in/ggstunnel/releases/download/v0.3.6/queue-validation-history.zip). See [qualification history](docs/queue-validation-history.md). Passing short cloud recipes does not guarantee acceleration on every WAN or multiday stability.
 
 # Release notes
 
