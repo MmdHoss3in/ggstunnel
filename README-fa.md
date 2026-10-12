@@ -1,6 +1,6 @@
 # ggstunnel — تانل رمز‌شدهٔ ایران ↔ خارج
 
-**v0.3.7 در حال آماده‌سازی برای انتشار:** اصلاح توقف DATA با وجود پیام‌های کنترلی، گیرکردن پنجره در یک بسته و PULL کم‌بازده. کانفیگ و قالب تانل‌های فعلی حفظ می‌شوند؛ آزمون ارتقای هفت سرویس، بازگشت پس از شکست و اتصال بین نسخهٔ ۰٫۳٫۶ و نسخهٔ جدید به گیت انتشار اضافه شده‌اند. [رفتار، محدودیت‌ها و روش ارتقا](docs/field-stall-recovery.md). تا انتشار assetها، دستورات نصب این نسخه آمادهٔ اجرا نیستند.
+**[v0.3.7 Stable منتشر شد](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.7).** توقف DATA با وجود پیام‌های کنترلی، گیرکردن پنجره در یک بسته و درخواست‌های PULL کم‌بازده اصلاح شدند. هر **۶۵ job** در [تأیید نهایی](https://github.com/MmdHoss3in/ggstunnel/actions/runs/38235510413) پاس شد؛ سورس بسته `9faa13d5dc8bc3f0a04a7bcd3f6125b0701f681a` است. ارتقا و بازگشت هفت کانفیگ با حفظ وضعیت سرویس‌ها و شکست عمدیِ ری‌استارت سوم روی AMD64/ARM64 تأیید شدند. سرعت بار ده‌دقیقه‌ای روی لینک ۵۰۰Mbps/RTT80ms برابر ۴۱۵٫۵/۴۱۹٫۳Mbps و حداکثر RSS برابر ۳۶٫۵/۲۸MiB بود؛ افت انتهاییِ معنادار یا تغییر پروسه دیده نشد. هر دو آزمون پانزده‌دقیقه‌ای منابع پاس شدند. [رفتار، نتیجه و ارتقا](docs/field-stall-recovery.md). اجرای اول به خطای آدرس loopback در دادهٔ آزمایش خورد؛ [خلاصهٔ سابقه](https://github.com/MmdHoss3in/ggstunnel/releases/download/v0.3.7/field-stall-validation-history.zip) حفظ شده است. این نتایج تضمین چندروزه یا عبور از فایروال نیستند.
 
 **[v0.3.6 Stable منتشر شد](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.6).** صف BIP برای جذب burst کوتاه از ظرفیت پایهٔ ۱۲۸ تا حداکثر ۵۱۲ بسته در هر جریان رشد می‌کند؛ سقف حافظهٔ مشترک ۸MiB و ترتیب بسته‌ها حفظ می‌شوند. علت حذف، اشغال صف و زمان انتظار به آمار اضافه شده‌اند. قالب، رمزنگاری، MTU و تنظیمات میزبان عوض نمی‌شوند. [رفتار و آزمون‌ها](docs/queue-pressure.md).
 
@@ -39,8 +39,8 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.7/install.sh -o /tmp/ggstunnel-install.sh
-sudo bash /tmp/ggstunnel-install.sh install
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.7/install.sh -o /tmp/ggstunnel-v0.3.7.sh &&
+sudo env GGS_VERSION=v0.3.7 bash /tmp/ggstunnel-v0.3.7.sh install
 ```
 
 نصاب بستهٔ باینری و سورس را از [Release v0.3.7](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.7) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند؛ نصب تا آماده‌شدن assetهای ریلیز ممکن نیست. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. ابتدا خارج و سپس ایران را ارتقا دهید. تنظیمات ذخیره‌شدهٔ ۱۶ و ۲۱ پابرجا می‌مانند؛ برای کانفیگ قدیمی BIP، گزینهٔ ۲۱ را یک بار در نسخهٔ جدید روی هر دو سمت اجرا کنید. این کار بعد از هر ری‌استارت لازم نیست و قالب opaque قبلی را خودکار به GGS5 تبدیل نمی‌کند.
@@ -143,7 +143,7 @@ sudo ggstunnel diagnose all
 ## ارتقا و بازگشت
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.7/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.7/install.sh -o /tmp/ggstunnel-v0.3.7.sh &&
 sudo bash /tmp/ggstunnel-install.sh update
 ```
 

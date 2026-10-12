@@ -1,5 +1,22 @@
 # v0.3.7: DATA progress, PULL discovery and existing installation upgrades
 
+Published 2026-10-12 from `9faa13d5dc8bc3f0a04a7bcd3f6125b0701f681a` after
+all **65 final jobs** passed:
+[exact-source run](https://github.com/MmdHoss3in/ggstunnel/actions/runs/38235510413).
+All 26 native upgrade/mixed-peer observations passed. The 600-second
+500Mbps/80ms BIP hold measured **415.517Mbps amd64 / 419.320Mbps arm64**;
+maximum process RSS was **36.539 / 28.023MiB**. Early/late receiver medians were
+419.703/418.607 and 421.525/421.531Mbps, respectively; processes remained the
+same, with verified concurrent flow maximum gaps of 0.214/0.196s. Both
+900-second resource gates passed with unchanged processes and 8 early/late
+file descriptors; maximum RSS was 33.547/27.121MiB in those separate scenarios.
+These are synthetic measurements, not multiday WAN or filtering guarantees.
+The first fixture failure and correction are retained as an
+[authored history summary](https://github.com/MmdHoss3in/ggstunnel/releases/download/v0.3.7/field-stall-validation-history.zip).
+Raw initial runner logs remain local; the archive contains no raw environment
+data. Final measurements are available in the release validation archives.
+
+
 Field reports from seven peers on 2026-10-12 exposed a failure that an
 authenticated-peer flag cannot describe: control packets still arrived while
 DATA delivery slowed to a trickle or stopped. Some new generations had no clean
