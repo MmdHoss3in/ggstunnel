@@ -58,3 +58,11 @@ the tagged source; raw records are retained in `field-stall-results.tar.gz`.
 Passing these tests is not a 95% extrapolation to multiday WAN behavior or a
 guarantee against upstream filtering. Wire modes, crypto, default payload,
 queue limits, host tuning and firewall policy are unchanged.
+
+The first qualification run at source `f26dba0ee84da1373def736a262443ce3d1aff08`
+passed native runtime/race and manager checks but both new real-upgrade jobs
+rejected the fixture's loopback addresses before creating tunnels. The manager's
+existing unicast guard is intentional. The fixture was corrected to use a
+disposable private dummy interface; production code and pass criteria were not
+changed. The original run is retained at
+https://github.com/MmdHoss3in/ggstunnel/actions/runs/38234942255.

@@ -29,10 +29,13 @@ def seven_instance_upgrade(baseline):
     names=[f'ggs{i:02d}' for i in range(1,8)]
     if any(m.confpath(n).exists() for n in names):raise RuntimeError('Refusing to overwrite an existing tunnel')
     m.install(baseline)
+    run('ip','link','add','ggs-ci-outer','type','dummy')
     saved={}
     try:
+        run('ip','addr','add','198.18.0.1/24','dev','ggs-ci-outer')
+        run('ip','link','set','ggs-ci-outer','up')
         for i,n in enumerate(names,1):
-            c=m.make_config(i,'bip','127.0.0.1',f'127.0.0.{10+i}',24000+i,f'{i:064x}','server')
+            c=m.make_config(i,'bip','198.18.0.1',f'198.18.0.{10+i}',24000+i,f'{i:064x}','server')
             c['tun']['routes']=[f'10.200.{i}.0/24']
             c['forwards']=[dict(protocol='tcp',listen=f'127.0.0.1:{25200+i}',target=f"{c['tun']['remote_addr']}:443")]
             m.atomic(m.confpath(n),json.dumps(c));saved[n]=m.confpath(n).read_bytes()
@@ -71,6 +74,7 @@ def seven_instance_upgrade(baseline):
         for n in names:
             m.run(['systemctl','disable','--now',m.unit(n)],check=False)
             m.confpath(n).unlink(missing_ok=True)
+        run('ip','link','del','ggs-ci-outer',check=False)
 
 def mixed_version(baseline):
     old=baseline/'dist'/BIN.name
