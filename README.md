@@ -37,11 +37,11 @@ ggstunnel یک تانل TUN نقطه‌به‌نقطه برای اتصال سر�
 ```bash
 sudo apt-get update
 sudo apt-get install -y curl ca-certificates
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.6/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.7/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh install
 ```
 
-نصاب بستهٔ باینری و سورس را از [Release v0.3.6](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.6) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند؛ نصب تا آماده‌شدن assetهای ریلیز ممکن نیست. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. ابتدا خارج و سپس ایران را ارتقا دهید. تنظیمات ذخیره‌شدهٔ ۱۶ و ۲۱ پابرجا می‌مانند؛ برای کانفیگ قدیمی BIP، گزینهٔ ۲۱ را یک بار در نسخهٔ جدید روی هر دو سمت اجرا کنید. این کار بعد از هر ری‌استارت لازم نیست و قالب opaque قبلی را خودکار به GGS5 تبدیل نمی‌کند.
+نصاب بستهٔ باینری و سورس را از [Release v0.3.7](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.7) دانلود و SHA256 آرشیو و فایل‌های بسته را بررسی می‌کند؛ نصب تا آماده‌شدن assetهای ریلیز ممکن نیست. فقط پیش‌نیازهای نصب‌نشده نصب می‌شوند. checksum تشخیص خرابی فایل است، نه امضای مستقل ناشر. ارتقا کانفیگ‌های موجود را نگه می‌دارد و سرویس‌های فعال را restart می‌کند. ابتدا خارج و سپس ایران را ارتقا دهید. تنظیمات ذخیره‌شدهٔ ۱۶ و ۲۱ پابرجا می‌مانند؛ برای کانفیگ قدیمی BIP، گزینهٔ ۲۱ را یک بار در نسخهٔ جدید روی هر دو سمت اجرا کنید. این کار بعد از هر ری‌استارت لازم نیست و قالب opaque قبلی را خودکار به GGS5 تبدیل نمی‌کند.
 
 **برای دفعات بعد فقط منو را باز کنید؛ هیچ نصب، دانلود یا بررسی پیش‌نیازی انجام نمی‌شود:**
 
@@ -55,11 +55,11 @@ sudo bash setup.sh menu
 
 ### تنظیم کانفیگ‌های قدیمی BIP
 
-برای کانفیگ‌های قدیمی BIP، بعد از ارتقای **هر دو سمت**، ابتدا گزینهٔ **۱۶** و سپس **۲۱** را روی هر سرور اجرا کنید. گزینهٔ ۱۶ سقف بافر kernel را حداقل ۱۶MiB می‌کند. گزینهٔ ۲۱ کانفیگ را پشتیبان می‌گیرد، `bip_delivery=independent` و `tuner.algorithm=delivery` را ذخیره می‌کند، درخواست بافر BIP را حداقل ۴MiB می‌کند، اندازه‌های بزرگ‌تر را نگه می‌دارد و سقف دستی PPS تیونر را غیرفعال می‌کند. کنترل ازدحام، پنجره و محدودیت حافظه فعال می‌مانند. گزینهٔ ۲۱ سرویس فعال را restart می‌کند و وقفهٔ کوتاه دارد؛ اگر از قبل `bip_delivery=independent` و `tuner.algorithm=delivery` ذخیره شده‌اند، برای ارتقای ۰٫۳٫۴ به ۰٫۳٫۶ نیاز به تکرار ۲۱ نیست؛ کانفیگ‌های قدیمی‌تر را یک بار با ۲۱ به این تنظیمات برسانید. پس از ذخیرهٔ این دستور جدید، تغییر مجدد تنظیم میزبان با ۱۶ فقط به ری‌استارت سوکت‌ها با ۶ نیاز دارد. این تنظیمات هنگام صرفاً بازکردن منو اعمال نمی‌شوند.
+برای کانفیگ‌های قدیمی BIP، بعد از ارتقای **هر دو سمت**، ابتدا گزینهٔ **۱۶** و سپس **۲۱** را روی هر سرور اجرا کنید. گزینهٔ ۱۶ سقف بافر kernel را حداقل ۱۶MiB می‌کند. گزینهٔ ۲۱ کانفیگ را پشتیبان می‌گیرد، `bip_delivery=independent` و `tuner.algorithm=delivery` را ذخیره می‌کند، درخواست بافر BIP را حداقل ۴MiB می‌کند، اندازه‌های بزرگ‌تر را نگه می‌دارد و سقف دستی PPS تیونر را غیرفعال می‌کند. کنترل ازدحام، پنجره و محدودیت حافظه فعال می‌مانند. گزینهٔ ۲۱ سرویس فعال را restart می‌کند و وقفهٔ کوتاه دارد؛ اگر از قبل `bip_delivery=independent` و `tuner.algorithm=delivery` ذخیره شده‌اند، برای ارتقای ۰٫۳٫۴ یا ۰٫۳٫۶ به ۰٫۳٫۷ نیاز به تکرار ۲۱ نیست؛ کانفیگ‌های قدیمی‌تر را یک بار با ۲۱ به این تنظیمات برسانید. پس از ذخیرهٔ این دستور جدید، تغییر مجدد تنظیم میزبان با ۱۶ فقط به ری‌استارت سوکت‌ها با ۶ نیاز دارد. این تنظیمات هنگام صرفاً بازکردن منو اعمال نمی‌شوند.
 
 ### نصب دستی یا آفلاین
 
-فایل‌های `ggstunnel-linux.tar.gz` و `SHA256SUMS` را از [Release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.6) دانلود و کنار هم قرار دهید:
+فایل‌های `ggstunnel-linux.tar.gz` و `SHA256SUMS` را از [Release](https://github.com/MmdHoss3in/ggstunnel/releases/tag/v0.3.7) دانلود و کنار هم قرار دهید:
 
 ```bash
 sha256sum -c SHA256SUMS
@@ -141,7 +141,7 @@ sudo ggstunnel diagnose all
 ## ارتقا و بازگشت
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.6/install.sh -o /tmp/ggstunnel-install.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/MmdHoss3in/ggstunnel/v0.3.7/install.sh -o /tmp/ggstunnel-install.sh
 sudo bash /tmp/ggstunnel-install.sh update
 ```
 

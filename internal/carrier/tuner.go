@@ -10,6 +10,8 @@ import (
 // Actor-owned controller. It changes local scheduling, never wire identities,
 // the packet MTU or global sysctls. This is not a TCP congestion implementation.
 type bipTuner struct {
+	lastRetryProgress time.Time
+
 	cfg                             config.TunerConfig
 	maxWindow                       int
 	initialRTO, srtt, variance, rto time.Duration
@@ -76,6 +78,7 @@ func (t *bipTuner) clampRTO(r time.Duration) time.Duration {
 	return max(time.Duration(t.cfg.MinRTOMS)*time.Millisecond, min(r, time.Duration(t.cfg.MaxRTOMS)*time.Millisecond))
 }
 func (t *bipTuner) reset() {
+	t.lastRetryProgress = time.Time{}
 	t.srtt = 0
 	t.variance = 0
 	t.rto = t.clampRTO(t.initialRTO)
@@ -219,6 +222,7 @@ func (t *bipTuner) pathChanged() {
 		return
 	}
 	t.srtt = 0
+	t.lastRetryProgress = time.Time{}
 	t.variance = 0
 	t.rto = t.clampRTO(t.initialRTO)
 	t.delivery.resetPath()

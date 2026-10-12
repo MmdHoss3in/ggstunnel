@@ -296,6 +296,8 @@ def peer_health(name, interval=2):
         stats = json.loads(path.read_text())
         carrier = stats.get('carrier') or stats
         if not isinstance(carrier,dict): return 'HEALTH UNKNOWN'
+
+        if carrier.get('delivery_stalled') is True: return 'DATA DELIVERY STALLED'
         if carrier.get('path_suspended') is True: return 'NO PEER RESPONSE'
         if carrier.get('peer_silence_ms',0)>90000: return 'NO PEER RESPONSE'
         if carrier.get('peer_authenticated') is False:
@@ -391,6 +393,14 @@ def diagnose(name):
             p=run(cmd,check=False,timeout=40);output=p.stdout+p.stderr
         except (OSError, subprocess.TimeoutExpired) as error: output='Unavailable: '+str(error)
         chunks.append('$ '+' '.join(map(str,cmd))+'\n'+output)
+    events=['journalctl','-u',unit(name),'--since','48 hours ago','-n','300','--no-pager',
+            '-o','short-iso-precise','--grep',
+            'recovering transport|delivery exhausted|handshake timeout|peer unresponsive|started role=|echo filter|socket buffers|Main process exited|Failed with result']
+    try:
+        p=run(events,check=False,timeout=40)
+        chunks.append('Lifecycle events (ordinary stats excluded):\n'+p.stdout+p.stderr)
+    except (OSError,subprocess.TimeoutExpired) as error:
+        chunks.append('Lifecycle events unavailable: '+str(error))
     stats=RUN/(name+'.json')
     if stats.exists():chunks.append(stats.read_text())
     atomic(path,'\n'.join(chunks));print('REPORT='+str(path))

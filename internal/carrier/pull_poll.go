@@ -10,6 +10,8 @@ import (
 // Actor-owned feedback for the receiving direction. Local FAST health says
 // nothing about whether the peer needs EchoRequest tuples to return its DATA.
 type pullPoller struct {
+	discoverySince time.Time
+
 	requests                         map[uint32]time.Time
 	rate                             float64
 	rtt                              time.Duration
@@ -54,6 +56,9 @@ func (b *BIP) pollingRate(now time.Time, active bool) float64 {
 		p.activeSince = time.Time{}
 	} else if p.activeSince.IsZero() {
 		p.activeSince = now
+		if p.discoverySince.IsZero() {
+			p.discoverySince = now
+		}
 		// Short MORE/NEED_PULL gaps must not restart a healthy receiving rate
 		// at 1000pps on every inner TCP ACK burst. Stale high rates restart
 		// conservatively, while unanswered low-rate discovery stays bounded.
@@ -73,7 +78,7 @@ func (b *BIP) pollingRate(now time.Time, active bool) float64 {
 		}
 		observed := float64(p.accepted-p.sampled) / elapsed.Seconds()
 		if active {
-			last := maxTime(p.activeSince, p.lastReply)
+			last := maxTime(p.discoverySince, p.lastReply)
 			switch {
 			case now.Sub(last) >= grace:
 				floor := float64(50)
@@ -82,7 +87,7 @@ func (b *BIP) pollingRate(now time.Time, active bool) float64 {
 				}
 				p.rate = max(floor, p.rate/2)
 			case observed > 0:
-				p.rate = max(1000, observed*1.5)
+				p.rate = max(50, observed*1.5)
 			}
 		}
 		p.sampleAt, p.sampled = now, p.accepted
@@ -92,7 +97,7 @@ func (b *BIP) pollingRate(now time.Time, active bool) float64 {
 		// Manual mode still honors its operator-selected rate, but unanswered
 		// polling backs off. Any valid returned DATA restores that target.
 		rate = float64(b.cfg.Transport.BIPPullPPS)
-		if active && now.Sub(maxTime(p.activeSince, p.lastReply)) >= grace {
+		if active && now.Sub(maxTime(p.discoverySince, p.lastReply)) >= grace {
 			rate = min(rate, p.rate)
 		}
 	} else if !b.tuner.cfg.UnlimitedRate {

@@ -64,6 +64,8 @@ var ErrBIPPeerUnresponsive = errors.New("BIP peer unresponsive")
 var ErrBIPHandshakeTimeout = errors.New("BIP authenticated handshake timeout")
 
 type outData struct {
+	firstSent time.Time
+
 	flags   byte
 	data    []byte
 	seq     uint32
@@ -110,6 +112,8 @@ type PacketIO interface {
 }
 
 type BIP struct {
+	deliveryHealth deliveryHealth
+
 	pathRequests                                                                                     chan bipPathRequest
 	pathPending                                                                                      *bipPathPending
 	pathPayload                                                                                      atomic.Int64
@@ -636,6 +640,7 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 	deliveredBytes := 0
 	var oldest time.Time
 	var delivered []ackDelivery
+	var retryAge time.Duration
 	accept := func(seq uint32) {
 		p := b.pending[seq]
 		if p == nil {
@@ -643,6 +648,13 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 		}
 		deliveredBytes += len(p.item.data)
 		delivered = append(delivered, ackDelivery{seq: seq, sent: p.sent, retries: p.item.retries})
+		b.deliveryHealth.lastAck = now
+		if p.mode == pendingModePull {
+			b.deliveryHealth.lastPullAck = now
+		}
+		if p.item.retries > 0 && p.mode == b.tuningPath && !p.item.firstSent.IsZero() {
+			retryAge = max(retryAge, now.Sub(p.item.firstSent))
+		}
 		b.traceRecord(traceEvent{At: now, Event: "ack_accept", Seq: seq, Ack: ack, Sack: bits, Mode: p.mode, Retries: p.item.retries, AgeMS: float64(now.Sub(p.sent)) / float64(time.Millisecond)})
 		fast = fast || p.mode == pendingModeFast
 		if b.tuner != nil {
@@ -703,6 +715,9 @@ func (b *BIP) processWideAckAt(ack uint32, bits uint64, extra []byte, now time.T
 		// producing premature timeouts and repeated congestion cuts.
 		b.tuner.onAck(clean, now.Sub(oldest), now)
 	}
+	if b.tuner != nil && retryAge > 0 {
+		b.tuner.onRetryProgress(retryAge, now)
+	}
 	if b.tuner != nil {
 		b.tuner.onDelivered(deliveredBytes, len(delivered), b.txBacklog() > 0, now)
 		if b.tuner.cfg.Algorithm == "delivery" {
@@ -716,6 +731,9 @@ func (b *BIP) queuePending(x outData, mode byte, now time.Time) {
 	defer b.ackMu.Unlock()
 	if old := b.pending[x.seq]; old != nil {
 		b.removePending(old)
+	}
+	if x.firstSent.IsZero() {
+		x.firstSent = now
 	}
 	p := &pendingData{item: x, sent: now, mode: mode, index: -1}
 	if b.tuner != nil {
@@ -845,6 +863,7 @@ func (b *BIP) resetPeer(id uint64) error {
 	b.txAckBase = 0
 	b.nextPullRetryCheck = time.Time{}
 	b.requestPathProven = false
+	b.deliveryHealth.reset()
 	b.poll = pullPoller{}
 	b.replay = frame.NewReplayGuard(65536)
 	b.fastUntil = time.Time{}
@@ -1087,7 +1106,6 @@ func (b *BIP) handle(body []byte, now time.Time) {
 	case bipKindPullProbe:
 		b.pullProbeRx.Add(1)
 		b.lastPull = now
-		b.needPullSince = time.Time{}
 		if !b.retryOnPull(p.id, p.tuple, now) {
 			b.deliverOne(0, p.id, p.tuple, pendingModePull, now)
 		}
@@ -1157,6 +1175,14 @@ func (b *BIP) ackSpan() int {
 func (b *BIP) deliverOne(typ byte, id, tuple uint16, mode byte, now time.Time) {
 	b.ackMu.Lock()
 	full := len(b.pending) >= b.window() || sequenceDistance(b.txAckBase, nextSequence(b.dataSeq)) > uint32(b.window())
+	if mode == pendingModeRequest && b.tuner != nil && b.tuner.adaptive() && !b.requestPathProven {
+		for _, p := range b.pending {
+			if p.mode == pendingModeRequest {
+				full = true
+				break
+			}
+		}
+	}
 	b.ackMu.Unlock()
 	b.ackMu.Lock()
 	congestionFull := b.tuner != nil && b.tuner.adaptive() && len(b.pending) >= b.tuner.window()
@@ -1266,6 +1292,10 @@ func (b *BIP) run(ctx context.Context) {
 			if b.active == 0 {
 				continue
 			}
+			if err := b.maintainDeliveryProgress(now); err != nil {
+				b.fail(err)
+				return
+			}
 			if !b.kernelEchoFilter.Load() {
 				b.updateCompactEchoFilter(b.active, now)
 			}
@@ -1330,7 +1360,7 @@ func (b *BIP) run(ctx context.Context) {
 					b.needPullSince = now
 				}
 			}
-			compat := !fast && !b.needPullSince.IsZero() && now.Sub(b.needPullSince) >= time.Duration(b.cfg.Transport.BIPPullTimeoutMS)*time.Millisecond && now.Sub(b.lastPull) >= time.Duration(b.cfg.Transport.BIPPullTimeoutMS)*time.Millisecond
+			compat := b.requestFallback(now, fast)
 			b.compatActive.Store(compat)
 			path := byte(0)
 			if fast {
@@ -1666,6 +1696,8 @@ func (b *BIP) SnapshotStats() RuntimeStats {
 		wireMode = "legacy"
 	}
 	return RuntimeStats{
+		DeliverySilenceMS:     b.deliveryHealth.silenceMS.Load(),
+		DeliveryStalled:       b.deliveryHealth.stalled.Load(),
 		PeerPacketPacking:     b.packetPacking.Load(),
 		PackedDataTx:          b.packedDataTx.Load(),
 		PackedFramesTx:        b.packedFramesTx.Load(),

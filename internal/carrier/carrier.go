@@ -21,6 +21,9 @@ type Carrier interface {
 // RuntimeStats is optional carrier telemetry used by the engine's periodic
 // status line. Counters are cumulative for the current transport instance.
 type RuntimeStats struct {
+	DeliverySilenceMS int64 `json:"delivery_silence_ms"`
+	DeliveryStalled   bool  `json:"delivery_stalled"`
+
 	PeerPacketPacking   bool    `json:"peer_packet_packing"`
 	PackedDataTx        uint64  `json:"packed_data_tx"`
 	PackedFramesTx      uint64  `json:"packed_frames_tx"`

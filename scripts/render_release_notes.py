@@ -113,4 +113,21 @@ from rc6_report import report as rc6_report
 notes += rc6_report(root/'rc6-collected', os.environ['GITHUB_SHA'])
 from queue_pressure_report import report as queue_report
 notes += queue_report(root/'queue-collected', os.environ['GITHUB_SHA'])
+stall=[]
+for path in sorted((root/'field-stall-collected').rglob('field-stall-results.jsonl')):
+    stall.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
+expected_stall={(arch,first,phase,reverse) for arch in ('amd64','arm64') for first in (0,1) for phase in ('old','mixed','new') for reverse in (False,True)}
+mixed=[r for r in stall if r['case']=='mixed-version']
+upgrades=[r for r in stall if r['case']=='seven-instance-real-upgrade']
+if len(stall)!=26 or len(mixed)!=24 or len(upgrades)!=2 or {(r['architecture'],r['first_upgraded'],r['phase'],r['reverse']) for r in mixed}!=expected_stall:
+    raise SystemExit('Missing native field-stall/upgrade observations')
+if any(r['status']!='pass' or r['source_commit']!=os.environ['GITHUB_SHA'] for r in stall):
+    raise SystemExit('Failed or wrong-source field-stall/upgrade observations')
+if {r['architecture'] for r in upgrades}!={'amd64','arm64'} or any(r['configurations_preserved']!=7 or r['restarted_pids']!=5 or not r['partial_failure_rollback'] for r in upgrades):
+    raise SystemExit('Incomplete seven-instance upgrade rollback evidence')
+notes+='\n## Field stall recovery and existing installation upgrade\n\n'
+notes+='Repeated race regressions cover authenticated controls without DATA progress, repaired-only ACK startup, and sparse PULL discovery. 26 native observations include real seven-service 0.3.6 upgrade/rollback with a third-service restart failure, unchanged configurations and active/enabled state, plus both upgrade orders and both directions on a 200Mbps/80ms link (100Mbps useful floor). Raw evidence: field-stall-results.tar.gz. These synthetic checks do not identify the original WAN outage or certify multiday operation.\n\n'
+notes+='| Arch | First upgraded | Phase | Direction | Received Mbps |\n|---|---:|---|---|---:|\n'
+for r in mixed:
+    notes+=f"| {r['architecture']} | {r['first_upgraded']} | {r['phase']} | {'reverse' if r['reverse'] else 'forward'} | {r['received_mbps']} |\n"
 (root/'artifacts/release-notes.md').write_text(notes)

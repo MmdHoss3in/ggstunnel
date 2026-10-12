@@ -1,3 +1,24 @@
+# v0.3.7 — recover productive DATA delivery and preserve existing installations
+
+Authenticated control traffic no longer hides stalled outgoing DATA. Empty PULL
+probes cannot indefinitely postpone request DATA fallback. A repaired-only
+startup can conservatively extend its timer and obtain a clean RTT sample,
+without fabricating RTT/bandwidth or bypassing pacing. Sparse PULL feedback and
+short MORE gaps no longer replenish wasteful discovery.
+
+Add DATA progress telemetry and separate lifecycle events in diagnostics.
+Existing configuration, wire format, crypto, default payload, queue bounds and
+host/firewall tuning remain unchanged. Upgrade foreign peers then Iran; saved
+options 16/21 remain valid. No tunnel deletion or new join codes are required.
+[Behavior and upgrade guidance](docs/field-stall-recovery.md).
+
+Publication requires all unchanged release gates plus native amd64/arm64 field
+regressions, exact published 0.3.6 mixed peers in both upgrade orders/directions,
+and real seven-instance upgrade/rollback with preserved configuration/service
+states and an injected third-service restart failure. Tagged measurements are
+appended below only after validation. Short synthetic tests do not establish
+95% multiday WAN confidence or identify the original upstream outage.
+
 # v0.3.6 — bounded BIP burst queues
 
 BIP receives a bounded young-burst reservoir to absorb transient queue pressure; sustained overload still drops. Generic carriers retain the original 128-packet bound. The BIP base remains 128 packets per flow; up to 512 are admitted only while the oldest waiting packet is younger than 20ms. Shared queued payload remains bounded by 8MiB. Metadata rings grow on demand, FIFO and round-robin service are retained, and sustained overload still drops.

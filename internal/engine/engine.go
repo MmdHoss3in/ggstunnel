@@ -150,7 +150,7 @@ func (e *Engine) Run(ctx context.Context) error {
 // bounded delivery/session rotation failures; unexpected errors remain fatal.
 func (e *Engine) recoverable(err error) bool {
 	return errors.Is(err, errPathReduced) || errors.Is(err, frame.ErrKeyLifetime) || (e.cfg.Transport.OpaqueSession == "challenge" && errors.Is(err, session.ErrRotationLimit)) || (e.cfg.Profile == "bip" &&
-		(errors.Is(err, carrier.ErrBIPDeliveryTimeout) || errors.Is(err, carrier.ErrBIPPeerUnresponsive) || errors.Is(err, carrier.ErrBIPHandshakeTimeout) || errors.Is(err, session.ErrRotationLimit)))
+		(errors.Is(err, carrier.ErrBIPDeliveryTimeout) || errors.Is(err, carrier.ErrBIPDeliveryStalled) || errors.Is(err, carrier.ErrBIPPeerUnresponsive) || errors.Is(err, carrier.ErrBIPHandshakeTimeout) || errors.Is(err, session.ErrRotationLimit)))
 }
 
 func (e *Engine) refreshTransport() error {

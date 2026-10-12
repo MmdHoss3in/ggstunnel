@@ -277,7 +277,7 @@ func TestReplyControlUnansweredPullBackoffAndRediscovery(t *testing.T) {
 		t.Fatal("late discovery reply rejected")
 	}
 	b.poll.accepted++
-	if rate := b.pollingRate(now.Add(8200*time.Millisecond), true); rate < 1000 {
-		t.Fatal("useful correlated DATA failed to restore polling capacity")
+	if rate := b.pollingRate(now.Add(8200*time.Millisecond), true); rate < 50 || rate > 100 {
+		t.Fatal("sparse correlated DATA failed to restore bounded polling")
 	}
 }
