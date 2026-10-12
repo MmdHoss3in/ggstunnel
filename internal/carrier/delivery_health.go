@@ -13,9 +13,9 @@ var ErrBIPDeliveryStalled = errors.New("BIP authenticated controls without DATA 
 // A control response proves peer liveness, not delivery of our outgoing flight.
 type deliveryHealth struct {
 	waitingSince, lastAck, lastPullAck time.Time
-	pullSince, compatUntil            time.Time
-	silenceMS                        atomic.Int64
-	stalled                          atomic.Bool
+	pullSince, compatUntil             time.Time
+	silenceMS                          atomic.Int64
+	stalled                            atomic.Bool
 }
 
 func (d *deliveryHealth) reset() {

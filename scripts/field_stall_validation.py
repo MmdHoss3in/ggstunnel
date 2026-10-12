@@ -32,7 +32,7 @@ def seven_instance_upgrade(baseline):
     saved={}
     try:
         for i,n in enumerate(names,1):
-            c=m.make_config(i,'bip','127.0.0.1',f'127.0.0.{10+i}',24000+i,'ci-only-'+str(i)+'a'*48,'server')
+            c=m.make_config(i,'bip','127.0.0.1',f'127.0.0.{10+i}',24000+i,f'{i:064x}','server')
             c['tun']['routes']=[f'10.200.{i}.0/24']
             c['forwards']=[dict(protocol='tcp',listen=f'127.0.0.1:{25200+i}',target=f"{c['tun']['remote_addr']}:443")]
             m.atomic(m.confpath(n),json.dumps(c));saved[n]=m.confpath(n).read_bytes()
